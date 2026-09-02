@@ -218,7 +218,7 @@ export function EndoscopyProcedureModule() {
   const [formBowelPrep, setFormBowelPrep] = useState('Overnight Fasting NPO > 8 Hours');
 
   // Pricing & Billing State
-  const [baseFee, setBaseFee] = useState<number>(3500);
+  const [baseFee, setBaseFee] = useState<number>(0);
   const [sedationFee, setSedationFee] = useState<number>(0);
   const [kitFee, setKitFee] = useState<number>(0);
   const [discountAmount, setDiscountAmount] = useState<number>(0);
@@ -2390,10 +2390,9 @@ export function EndoscopyProcedureModule() {
                   <Input 
                     type="number" 
                     placeholder="0"
-                    value={baseFee === 0 ? '' : baseFee} 
-                    onChange={(e) => setBaseFee(e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
-                    onFocus={(e) => e.target.select()}
-                    className="h-8 text-xs bg-white" 
+                    value={baseFee} 
+                    readOnly
+                    className="h-8 text-xs bg-slate-50 text-slate-500 cursor-not-allowed font-bold" 
                   />
                 </div>
 
@@ -2402,10 +2401,9 @@ export function EndoscopyProcedureModule() {
                   <Input 
                     type="number" 
                     placeholder="0"
-                    value={sedationFee === 0 ? '' : sedationFee} 
-                    onChange={(e) => setSedationFee(e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
-                    onFocus={(e) => e.target.select()}
-                    className="h-8 text-xs bg-white" 
+                    value={sedationFee} 
+                    readOnly
+                    className="h-8 text-xs bg-slate-50 text-slate-500 cursor-not-allowed font-bold" 
                   />
                 </div>
 
@@ -2414,10 +2412,9 @@ export function EndoscopyProcedureModule() {
                   <Input 
                     type="number" 
                     placeholder="0"
-                    value={kitFee === 0 ? '' : kitFee} 
-                    onChange={(e) => setKitFee(e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
-                    onFocus={(e) => e.target.select()}
-                    className="h-8 text-xs bg-white" 
+                    value={kitFee} 
+                    readOnly
+                    className="h-8 text-xs bg-slate-50 text-slate-500 cursor-not-allowed font-bold" 
                   />
                 </div>
 
