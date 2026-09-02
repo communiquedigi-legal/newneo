@@ -104,6 +104,29 @@ const INITIAL_SCOPE_DISINFECTION_LOGS: ScopeDisinfectionLog[] = [
 
 const DEFAULT_PROCEDURE_RATE_CARD = MOCK_ENDO_RATES;
 
+const getMergedRateCard = () => {
+  const baseCard = storage.get(STORAGE_KEYS.ENDO_PROCEDURE_RATES, DEFAULT_PROCEDURE_RATE_CARD);
+  const gastroRates = storage.get(STORAGE_KEYS.GASTRO_SERVICES_RATES, null);
+  
+  const merged = { ...baseCard };
+  
+  if (gastroRates && Array.isArray(gastroRates)) {
+    gastroRates.forEach((g: any) => {
+      if (g.category && g.category !== 'OPD Consultation' && g.category !== 'Registration') {
+        const existingKitFee = merged[g.service]?.kitFee || 0;
+        merged[g.service] = {
+          baseFee: Number(g.charges) || 0,
+          sedationFee: Number(g.sedationCharges) || 0,
+          kitFee: existingKitFee,
+          category: g.category
+        };
+      }
+    });
+  }
+  
+  return merged;
+};
+
 const INITIAL_DIRECT_PROCEDURES: DirectEndoscopyProcedure[] = [
   {
     id: 'ENDO-PROC-101',
@@ -254,7 +277,7 @@ export function EndoscopyProcedureModule() {
 
   // Load procedures, patients and rate card from local storage
   const [rateCard, setRateCard] = useState<Record<string, { baseFee: number; sedationFee: number; kitFee: number; category: any }>>(() => {
-    return storage.get(STORAGE_KEYS.ENDO_PROCEDURE_RATES, DEFAULT_PROCEDURE_RATE_CARD);
+    return getMergedRateCard();
   });
 
   useEffect(() => {
@@ -278,8 +301,7 @@ export function EndoscopyProcedureModule() {
     }
 
     const handleStorage = () => {
-      const updatedRates = storage.get(STORAGE_KEYS.ENDO_PROCEDURE_RATES, DEFAULT_PROCEDURE_RATE_CARD);
-      setRateCard(updatedRates);
+      setRateCard(getMergedRateCard());
       const updatedDisinfection = storage.get('hms_scope_disinfection_logs', INITIAL_SCOPE_DISINFECTION_LOGS);
       setDisinfectionLogs(updatedDisinfection);
     };
