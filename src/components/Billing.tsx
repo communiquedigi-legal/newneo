@@ -50,7 +50,7 @@ import { numberToWords } from '@/lib/pharmacyInvoicePrint';
 import { sortInvoicesByLatestSerial, calculateHospitalGst } from '@/lib/taxUtils';
 import { storage, STORAGE_KEYS } from '@/lib/storage';
 import { saveAuditLog } from '@/services/supabaseService';
-import { MOCK_USERS, MOCK_BILLING, MOCK_BED_RATES, MOCK_OT_RATES, MOCK_LAB_TESTS, MOCK_MATERIAL_RATES, MOCK_INVENTORY, MOCK_PRESCRIPTIONS } from '@/mockData';
+import { MOCK_USERS, MOCK_BILLING, MOCK_BED_RATES, MOCK_OT_RATES, MOCK_LAB_TESTS, MOCK_MATERIAL_RATES, MOCK_INVENTORY, MOCK_PRESCRIPTIONS, MOCK_ENDO_RATES, MOCK_HOSPITAL_ROOM_RATES, MOCK_CARDIOLOGY_EQUIPMENT_RATES, MOCK_CLINICAL_PROCEDURE_RATES, MOCK_GASTRO_SERVICES, MOCK_HOSPITAL_BILLING_POLICY } from '@/mockData';
 import { supabaseService, isDummyPatient, toDeterministicUuid, isIdMatch } from '@/services/supabaseService';
 import { useDataSync } from '@/hooks/useDataSync';
 import { canUserViewFinancials, canUserManageBilling, normalizeRole } from '@/utils/rbac';
@@ -351,6 +351,15 @@ export default function Billing() {
   const [materialRates, setMaterialRates] = useState(() => storage.get(STORAGE_KEYS.MATERIAL_RATES, MOCK_MATERIAL_RATES));
   const [inventory, setInventory] = useState<any[]>(() => storage.get(STORAGE_KEYS.INVENTORY, MOCK_INVENTORY));
   const [prescriptions, setPrescriptions] = useState<any[]>(() => storage.get(STORAGE_KEYS.PRESCRIPTIONS, MOCK_PRESCRIPTIONS));
+  
+  // New Rate States
+  const [endoRates, setEndoRates] = useState<any>(() => storage.get(STORAGE_KEYS.ENDO_PROCEDURE_RATES, MOCK_ENDO_RATES));
+  const [gastroServices, setGastroServices] = useState<any[]>(() => storage.get(STORAGE_KEYS.GASTRO_SERVICES_RATES, MOCK_GASTRO_SERVICES));
+  const [hospitalRoomRates, setHospitalRoomRates] = useState<any[]>(() => storage.get(STORAGE_KEYS.HOSPITAL_ROOM_RATES, MOCK_HOSPITAL_ROOM_RATES));
+  const [cardiologyRates, setCardiologyRates] = useState<any[]>(() => storage.get(STORAGE_KEYS.CARDIOLOGY_EQUIPMENT_RATES, MOCK_CARDIOLOGY_EQUIPMENT_RATES));
+  const [clinicalProcedures, setClinicalProcedures] = useState<any[]>(() => storage.get(STORAGE_KEYS.CLINICAL_PROCEDURE_RATES, MOCK_CLINICAL_PROCEDURE_RATES));
+  const [hospitalBillingPolicy, setHospitalBillingPolicy] = useState<any[]>(() => storage.get(STORAGE_KEYS.HOSPITAL_BILLING_POLICY, MOCK_HOSPITAL_BILLING_POLICY));
+  const [opdCharges, setOpdCharges] = useState<any>(() => storage.get(STORAGE_KEYS.OPD_CHARGES, { reg: 200, appt: 0, consult: 500 }));
 
   const [customCategories, setCustomCategories] = useState<any[]>(() => {
     return storage.get('hms_custom_billing_categories', []);
@@ -367,14 +376,16 @@ export default function Billing() {
 
   const allCategories = useMemo(() => {
     const defaults = [
-      { id: 'opd', name: 'OPD Consultation', isDefault: true },
-      { id: 'endoscopy', name: 'Endoscopy & Colonoscopy', isDefault: true },
-      { id: 'ipd', name: 'IPD / Ward', isDefault: true },
-      { id: 'ot', name: 'Surgery / OT', isDefault: true },
-      { id: 'lab', name: 'Pathology / Lab', isDefault: true },
-      { id: 'radio', name: 'Radiology', isDefault: true },
-      { id: 'materials', name: 'Materials / Disposables', isDefault: true },
+      { id: 'endo', name: 'Gastroenterology Services & Endoscopy Procedures', isDefault: true },
+      { id: 'ipd_room', name: 'Hospital Charges & IPD Room Rates', isDefault: true },
+      { id: 'lab', name: 'Pathology & Laboratory Tariff Master', isDefault: true },
+      { id: 'radio', name: 'Radiology & Imaging Tariff', isDefault: true },
+      { id: 'cardio', name: 'Cardiology & ICU Equipment', isDefault: true },
+      { id: 'clinical', name: 'Clinical Procedures & Nursing Interventions', isDefault: true },
+      { id: 'policy', name: 'Hospital Billing Policies & Advance Deposits', isDefault: true },
+      { id: 'opd', name: 'OPD & Consultation Base Charges', isDefault: true },
       { id: 'pharmacy', name: 'Pharmacy', isDefault: true },
+      { id: 'materials', name: 'Materials / Disposables', isDefault: true },
       { id: 'custom', name: 'CUSTOM', isDefault: true }
     ];
     return [...defaults, ...customCategories];
@@ -528,10 +539,28 @@ export default function Billing() {
     
     let services: { name: string; rate: number; isCustom?: boolean; id?: string; stock?: number; unit?: string }[] = [];
     
-    if (catId === 'ot') {
-      services = otRates.map((r: any) => ({ name: r.type, rate: r.rate }));
-    } else if (catId === 'ipd') {
-      services = bedRates.map((r: any) => ({ name: r.type, rate: r.rate }));
+    if (catId === 'ipd_room') {
+      services = hospitalRoomRates.map((r: any) => ({ name: r.service, rate: Number(r.charges) || 0 }));
+    } else if (catId === 'clinical') {
+      services = clinicalProcedures.map((r: any) => ({ name: r.service, rate: Number(r.charges) || 0 }));
+    } else if (catId === 'cardio') {
+      services = cardiologyRates.map((r: any) => ({ name: r.service, rate: Number(r.charges) || 0 }));
+    } else if (catId === 'policy') {
+      services = hospitalBillingPolicy.map((r: any) => ({ name: r.service, rate: Number(r.charges) || 0 }));
+    } else if (catId === 'endo') {
+      if (endoRates) {
+        Object.keys(endoRates).forEach(key => {
+          const item = endoRates[key];
+          services.push({ name: `${key} (Base Fee)`, rate: Number(item.baseFee) || 0 });
+          if (item.sedationFee > 0) services.push({ name: `${key} (Sedation)`, rate: Number(item.sedationFee) || 0 });
+          if (item.kitFee > 0) services.push({ name: `${key} (Kit/Pack)`, rate: Number(item.kitFee) || 0 });
+        });
+      }
+      if (gastroServices) {
+        gastroServices.forEach((s: any) => {
+          services.push({ name: s.service, rate: Number(s.charges) || 0 });
+        });
+      }
     } else if (catId === 'lab') {
       services = labRates.filter((t: any) => t.category === 'Pathology').map((t: any) => ({ name: t.name, rate: t.price }));
     } else if (catId === 'radio') {
@@ -552,33 +581,9 @@ export default function Billing() {
       ];
     } else if (catId === 'opd') {
       services = [
-        { name: 'OPD General Consultation', rate: 500 },
-        { name: 'Specialist Consultation', rate: 800 },
-        { name: 'Super Specialist / Senior Consultant OPD', rate: 1200 },
-        { name: 'OPD Follow-Up Consultation', rate: 300 },
-        { name: 'Emergency Consultation', rate: 1000 },
-        { name: 'Day Care Observation (Hourly)', rate: 300 },
-        { name: 'ECG / Clinical Checkup', rate: 400 },
-        { name: 'Nebulization Session', rate: 150 },
-        { name: 'Minor Wound Dressing & Suture Care', rate: 250 },
-        { name: 'IV Cannulation / Injection Administration', rate: 150 },
-        { name: 'Blood Sugar (GRBS) Rapid Test', rate: 100 }
-      ];
-    } else if (catId === 'endoscopy') {
-      services = [
-        { name: 'Upper GI Endoscopy (Diagnostic)', rate: 2500 },
-        { name: 'Upper GI Endoscopy with Biopsy', rate: 3500 },
-        { name: 'Colonoscopy (Full Diagnostic)', rate: 4500 },
-        { name: 'Colonoscopy with Biopsy / Polypectomy', rate: 6000 },
-        { name: 'Endoscopic Variceal Ligation (EVL / Banding)', rate: 8000 },
-        { name: 'Endoscopic Sclerotherapy (EST)', rate: 5000 },
-        { name: 'Endoscopic Hemoclip Application', rate: 6500 },
-        { name: 'Endoscopic Foreign Body Removal', rate: 5500 },
-        { name: 'Flexible Sigmoidoscopy', rate: 2200 },
-        { name: 'ERCP (Diagnostic / Therapeutic)', rate: 15000 },
-        { name: 'Liver Fibroscan / Elastography', rate: 2000 },
-        { name: 'Endoscopy Sedation / Anesthesia Fee', rate: 1500 },
-        { name: 'Disposable Biopsy Forceps & Pack', rate: 800 }
+        { name: 'OPD Consultation Fee', rate: Number(opdCharges?.consult) || 500 },
+        { name: 'Follow-up Consultation', rate: Number(opdCharges?.appt) || 300 },
+        { name: 'Registration Fee', rate: Number(opdCharges?.reg) || 200 }
       ];
     } else if (catId === 'pharmacy') {
       const invMeds = (inventory || []).map((item: any) => ({
