@@ -304,6 +304,9 @@ export default function Billing() {
       }
 
       setBills(uniqueBills);
+      if (uniqueBills.length > 0) {
+        storage.set(STORAGE_KEYS.BILLING, uniqueBills);
+      }
     }
     if (patientsData) {
       const directEndoProcedures = storage.get(STORAGE_KEYS.ENDOSCOPY_DIRECT_PROCEDURES, []);
@@ -327,9 +330,17 @@ export default function Billing() {
         }
       });
       setPatients(combinedPatients);
+      if (combinedPatients.length > 0) {
+        storage.set(STORAGE_KEYS.PATIENTS, combinedPatients);
+      }
     }
     if (staffData && staffData.length > 0) setUsers(staffData);
-    if (expensesData) setExpenses(expensesData);
+    if (expensesData) {
+      setExpenses(expensesData);
+      if (expensesData.length > 0) {
+        storage.set(STORAGE_KEYS.EXPENSES, expensesData);
+      }
+    }
     if (appointmentsData) {
       const filteredApts = appointmentsData.filter((apt: any) => {
         const pId = apt.patient_id || apt.patientId;
@@ -338,6 +349,9 @@ export default function Billing() {
         return !isDummyPatient(patObj);
       });
       setAppointments(filteredApts);
+      if (filteredApts.length > 0) {
+        storage.set(STORAGE_KEYS.APPOINTMENTS, filteredApts);
+      }
     }
     setLoading(false);
   };

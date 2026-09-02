@@ -1511,6 +1511,76 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
       {/* Tab: Beds */}
       {activeTab === 'beds' && (
         <div className="space-y-6">
+          {/* Waiting for IPD Admission & Bed Allocation Queue */}
+          {pendingAdmissions.length > 0 && (
+            <Card className="border-2 border-amber-300 bg-amber-50/70 shadow-md overflow-hidden rounded-2xl">
+              <CardHeader className="p-4 bg-amber-100/80 border-b border-amber-200 flex flex-row items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <span className="flex h-3 w-3 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                  </span>
+                  <div>
+                    <CardTitle className="text-sm font-black text-amber-900 flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-amber-700" />
+                      Waiting for IPD Admission & Bed Allotment ({pendingAdmissions.length})
+                    </CardTitle>
+                    <CardDescription className="text-xs text-amber-800 font-medium">
+                      Patients transferred from OPD / Emergency awaiting inpatient ward & bed allocation.
+                    </CardDescription>
+                  </div>
+                </div>
+                <Badge className="bg-amber-600 text-white border-none font-bold text-xs px-2.5 py-1">
+                  {pendingAdmissions.length} Pending
+                </Badge>
+              </CardHeader>
+              <CardContent className="p-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {pendingAdmissions.map((pat) => (
+                    <div 
+                      key={pat.id} 
+                      className="bg-white border border-amber-200 rounded-xl p-3.5 shadow-xs flex flex-col justify-between gap-3 hover:border-amber-400 transition-all"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-start">
+                          <span className="font-extrabold text-slate-900 text-sm">{pat.name}</span>
+                          <span className="font-mono text-xs font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">
+                            {pat.mrn || 'N/A'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 font-medium">
+                          {pat.age || '—'}Y • {pat.gender || '—'} • 📞 {pat.phone || pat.mobile || 'N/A'}
+                        </p>
+                        {pat.transferred_to_ipd_at && (
+                          <p className="text-[10px] text-slate-500 font-mono">
+                            Transferred: {new Date(pat.transferred_to_ipd_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex gap-2 pt-1 border-t border-slate-100">
+                        <Button
+                          size="sm"
+                          className="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs h-8 gap-1.5 shadow-xs"
+                          onClick={() => {
+                            setAdmissionForm({
+                              ...admissionForm,
+                              patientId: pat.id
+                            });
+                            setActiveTab('registration');
+                            toast.info(`Selected ${pat.name} for bed allocation. Please choose ward and bed.`);
+                          }}
+                        >
+                          <BedIcon className="w-3.5 h-3.5" />
+                          Allot Bed & Check-In
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Top Category Summary */}
           <Card className="border border-slate-200/80 shadow-xs bg-white overflow-hidden">
             <CardHeader className="p-4 bg-slate-50 border-b flex flex-row items-center justify-between">

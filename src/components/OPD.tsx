@@ -630,6 +630,14 @@ export default function OPD() {
   });
   const [isSavingQuickContact, setIsSavingQuickContact] = useState(false);
 
+  // Part / Full Refund Modal States
+  const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
+  const [refundTargetApt, setRefundTargetApt] = useState<any>(null);
+  const [refundAmountInput, setRefundAmountInput] = useState<string>('');
+  const [refundReasonInput, setRefundReasonInput] = useState<string>('Patient consultation cancellation / doctor unavailable');
+  const [refundModeInput, setRefundModeInput] = useState<string>('Cash');
+  const [isProcessingRefund, setIsProcessingRefund] = useState(false);
+
   const handleOpenRegisterChange = (open: boolean) => {
     setIsRegisterOpen(open);
     if (!open) {
@@ -3944,63 +3952,163 @@ export default function OPD() {
     toast.success('Appointment deleted successfully');
   };
 
-  const handleRefundAppointment = async (id: string) => {
-    if (!window.confirm("Are you sure you want to refund this consultation fee? This will mark the transaction as Refunded.")) return;
+  const openRefundModal = (apt: any) => {
+    if (!apt) return;
+    const baseFee = Number(apt.fee || appointmentFee || (storage.get(STORAGE_KEYS.OPD_CHARGES, { consult: 500 }).consult || 500));
+    const disc = Number(apt.discount_amount || apt.discountAmount || 0);
+    const netPaid = Math.max(0, baseFee - disc);
+    const prevRefund = Number(apt.refund_amount || apt.refundAmount || 0);
+    const maxRefundable = Math.max(0, netPaid - prevRefund);
+
+    setRefundTargetApt(apt);
+    setRefundAmountInput(maxRefundable > 0 ? maxRefundable.toString() : '0');
+    setRefundReasonInput('Patient consultation cancellation / doctor unavailable');
+    setRefundModeInput('Cash');
+    setIsRefundModalOpen(true);
+  };
+
+  const handleProcessRefund = async () => {
+    if (!refundTargetApt) return;
+    const refundAmt = parseFloat(refundAmountInput);
+    if (isNaN(refundAmt) || refundAmt <= 0) {
+      toast.error('Please enter a valid refund amount greater than 0');
+      return;
+    }
+
+    const baseFee = Number(refundTargetApt.fee || appointmentFee || (storage.get(STORAGE_KEYS.OPD_CHARGES, { consult: 500 }).consult || 500));
+    const disc = Number(refundTargetApt.discount_amount || refundTargetApt.discountAmount || 0);
+    const netPaid = Math.max(0, baseFee - disc);
+    const prevRefund = Number(refundTargetApt.refund_amount || refundTargetApt.refundAmount || 0);
+    const totalRefundAfter = prevRefund + refundAmt;
+
+    if (totalRefundAfter > netPaid) {
+      toast.error(`Refund amount cannot exceed total net paid of ₹${netPaid}. Max refundable now is ₹${netPaid - prevRefund}.`);
+      return;
+    }
+
+    setIsProcessingRefund(true);
     const refundBy = currentUser?.name || 'Staff';
-    const success = await supabaseService.updateAppointment(id, { 
-      payment_status: 'Refunded',
-      refund_given_by: refundBy
-    });
-    if (success) {
-      const nextApts = appointments.map(a => a.id === id ? { ...a, payment_status: 'Refunded', refund_given_by: refundBy, refundGivenBy: refundBy } : a);
+    const isFullRefund = totalRefundAfter >= netPaid;
+    const paymentStatus = isFullRefund ? 'Refunded' : 'Partially Refunded';
+
+    try {
+      const updateData = {
+        payment_status: paymentStatus,
+        paymentStatus: paymentStatus,
+        refund_amount: totalRefundAfter,
+        refundAmount: totalRefundAfter,
+        refund_given_by: refundBy,
+        refundGivenBy: refundBy,
+        refund_date: new Date().toISOString(),
+        refund_reason: refundReasonInput,
+        refund_mode: refundModeInput
+      };
+
+      await supabaseService.updateAppointment(refundTargetApt.id, updateData);
+
+      const nextApts = appointments.map(a => 
+        a.id === refundTargetApt.id ? { ...a, ...updateData } : a
+      );
       setAppointments(nextApts);
-      
-      try {
-        const apt = appointments.find(a => a.id === id);
-        if (apt) {
-          const patientId = apt.patientId || apt.patient_id;
-          if (patientId) {
-            const invoices = await supabaseService.getInvoices();
-            const opdInvoices = invoices && invoices.length > 0 ? invoices.filter((inv: any) => {
-              const isMatchPatient = (inv.patient_id === patientId || inv.patientId === patientId);
-              const isOPD = inv.type === 'OPD' || 
-                            inv.invoice_number?.startsWith('INV-REG') || 
-                            inv.invoice_number?.startsWith('INV-OPD') ||
-                            inv.invoice_number?.includes('REG') ||
-                            inv.invoice_number?.includes('OPD');
-              return isMatchPatient && isOPD;
-            }) : [];
+      storage.set(STORAGE_KEYS.APPOINTMENTS, nextApts);
 
-            const currentBills = storage.get(STORAGE_KEYS.BILLING, []);
-            let updatedBills = [...currentBills];
+      // Synchronize with Invoices and Billing ledger
+      const patientId = refundTargetApt.patientId || refundTargetApt.patient_id;
+      if (patientId) {
+        const invoices = await supabaseService.getInvoices();
+        const opdInvoices = invoices && invoices.length > 0 ? invoices.filter((inv: any) => {
+          const isMatchPatient = (inv.patient_id === patientId || inv.patientId === patientId);
+          const isOPD = inv.type === 'OPD' || 
+                        inv.invoice_number?.startsWith('INV-REG') || 
+                        inv.invoice_number?.startsWith('INV-OPD') ||
+                        inv.invoice_number?.includes('REG') ||
+                        inv.invoice_number?.includes('OPD');
+          return isMatchPatient && isOPD;
+        }) : [];
 
-            if (opdInvoices.length > 0) {
-              for (const inv of opdInvoices) {
-                const updatedInv = { ...inv, status: 'Refunded', payment_status: 'Refunded' };
-                await supabaseService.updateInvoice(inv.id, updatedInv);
-                updatedBills = updatedBills.map((b: any) => b.id === inv.id ? updatedInv : b);
-              }
-            }
+        const currentBills = storage.get(STORAGE_KEYS.BILLING, []);
+        let updatedBills = [...currentBills];
+
+        if (opdInvoices.length > 0) {
+          for (const inv of opdInvoices) {
+            const invTotal = Number(inv.total_amount || inv.total || 0);
+            const invPaid = Number(inv.paid_amount || inv.paid || invTotal);
+            const newPaid = Math.max(0, invPaid - refundAmt);
+            const invStatus = isFullRefund ? 'Refunded' : (newPaid > 0 ? 'Partially Refunded' : 'Refunded');
             
-            // Update local storage cache to keep everything in sync
-            storage.set(STORAGE_KEYS.APPOINTMENTS, nextApts);
-            storage.set(STORAGE_KEYS.BILLING, updatedBills);
-
-            window.dispatchEvent(new CustomEvent('supabase-data-sync', { 
-              detail: { table: 'invoices', action: 'update' } 
-            }));
-            window.dispatchEvent(new CustomEvent('supabase-data-sync', { 
-              detail: { table: 'appointments', action: 'update' } 
-            }));
+            const updatedInv = { 
+              ...inv, 
+              status: invStatus, 
+              payment_status: invStatus,
+              refund_amount: (Number(inv.refund_amount || 0) + refundAmt),
+              paid_amount: newPaid,
+              paid: newPaid,
+              notes: `${inv.notes || ''} | Refunded ₹${refundAmt} via ${refundModeInput} by ${refundBy} (${refundReasonInput})`
+            };
+            await supabaseService.updateInvoice(inv.id, updatedInv);
+            updatedBills = updatedBills.map((b: any) => b.id === inv.id ? updatedInv : b);
           }
         }
-      } catch (err) {
-        console.error('Error syncing invoice refund:', err);
+
+        storage.set(STORAGE_KEYS.BILLING, updatedBills);
+
+        window.dispatchEvent(new CustomEvent('supabase-data-sync', { 
+          detail: { table: 'invoices', action: 'update' } 
+        }));
       }
 
-      toast.success('Consultation fee refunded successfully');
-    } else {
-      toast.error('Failed to update refund status');
+      window.dispatchEvent(new CustomEvent('supabase-data-sync', { 
+        detail: { table: 'appointments', action: 'update' } 
+      }));
+
+      setIsRefundModalOpen(false);
+      setRefundTargetApt(null);
+      toast.success(`Successfully recorded ₹${refundAmt} refund (${isFullRefund ? 'Full Refund' : 'Part Refund'}). Billing & Collections updated!`);
+    } catch (err: any) {
+      console.error('Error processing refund:', err);
+      toast.error('Failed to process refund: ' + (err.message || 'Error'));
+    } finally {
+      setIsProcessingRefund(false);
+    }
+  };
+
+  const handleRefundAppointment = async (id: string) => {
+    const targetApt = appointments.find(a => a.id === id);
+    if (targetApt) {
+      openRefundModal(targetApt);
+    }
+  };
+
+  const handleTransferToIPD = async (patient: any) => {
+    if (!patient) return;
+    const patName = patient.name || patient.patient_name || patient.patientName || 'Patient';
+    const confirmTransfer = window.confirm(`Are you sure you want to transfer ${patName} to IPD Admission? This will place them in the IPD Waiting Queue for bed allocation.`);
+    if (!confirmTransfer) return;
+    try {
+      const updatePayload = { 
+        status: 'Admitting', 
+        registrationType: 'OPD/IPD', 
+        registration_type: 'OPD/IPD',
+        needsAdmission: true,
+        needs_admission: true,
+        transferred_to_ipd_at: new Date().toISOString()
+      };
+      const result = await supabaseService.updatePatient(patient.id, updatePayload);
+      const updatedPatients = patients.map(p => 
+        p.id === patient.id ? { ...p, ...updatePayload, ...(result || {}) } : p
+      );
+      setPatients(updatedPatients);
+      storage.set(STORAGE_KEYS.PATIENTS, updatedPatients);
+      window.dispatchEvent(new CustomEvent('supabase-data-sync', { detail: { table: 'patients', action: 'update' } }));
+      toast.success(`${patName} transferred to IPD! Open IPD Management to assign bed and complete inpatient check-in.`, {
+        action: {
+          label: 'Go to IPD',
+          onClick: () => navigate('/ipd')
+        }
+      });
+    } catch (err: any) {
+      console.error('Error transferring to IPD:', err);
+      toast.error('Failed to transfer patient to IPD: ' + (err.message || 'Error'));
     }
   };
 
@@ -6402,19 +6510,20 @@ export default function OPD() {
             {activeTab === 'patients' ? (
               <Table>
                 <TableHeader>
-                  <TableRow className="hover:bg-transparent border-slate-100">
-                    <TableHead className="w-[10%] whitespace-nowrap">MRN</TableHead>
-                    <TableHead className="w-[20%] whitespace-nowrap">Patient Name</TableHead>
-                    <TableHead className="w-[15%] whitespace-nowrap">Age/Gender</TableHead>
-                    <TableHead className="w-[15%] whitespace-nowrap">Contact</TableHead>
-                    <TableHead className="w-[15%] whitespace-nowrap">Last Visit</TableHead>
-                    <TableHead className="w-[25%] text-right whitespace-nowrap">Actions</TableHead>
+                  <TableRow className="hover:bg-transparent border-slate-200 bg-slate-50/80">
+                    <TableHead className="sticky left-0 bg-slate-50 z-20 w-[110px] min-w-[110px] whitespace-nowrap font-bold text-slate-700 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">MRN</TableHead>
+                    <TableHead className="sticky left-[110px] bg-slate-50 z-20 min-w-[180px] whitespace-nowrap font-bold text-slate-700 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">Patient Name</TableHead>
+                    <TableHead className="w-[12%] whitespace-nowrap font-bold text-slate-700">Age/Gender</TableHead>
+                    <TableHead className="w-[14%] whitespace-nowrap font-bold text-slate-700">Contact</TableHead>
+                    <TableHead className="w-[12%] whitespace-nowrap font-bold text-slate-700">Last Visit</TableHead>
+                    <TableHead className="w-[12%] whitespace-nowrap font-bold text-slate-700">IPD Status</TableHead>
+                    <TableHead className="w-[28%] text-right whitespace-nowrap font-bold text-slate-700">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredPatients.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="h-48 text-center">
+                      <TableCell colSpan={7} className="h-48 text-center">
                         <div className="flex flex-col items-center justify-center gap-2 text-slate-500 py-8">
                           <User className="w-8 h-8 text-slate-300" />
                           <p className="font-semibold text-slate-700">No patient records found</p>
@@ -6444,24 +6553,32 @@ export default function OPD() {
                   ) : (
                     filteredPatients
                       .slice((patientsPage - 1) * itemsPerPage, patientsPage * itemsPerPage)
-                      .map((patient) => (
-                        <TableRow key={patient.id} className="border-slate-50 hover:bg-slate-50/70 transition-colors">
-                          <TableCell className="font-bold text-medical-blue whitespace-nowrap">{patient.mrn}</TableCell>
+                      .map((patient) => {
+                        const isPendingIPD = patient.needsAdmission === true || patient.needs_admission === true || patient.status === 'Admitting';
+                        const isAdmittedIPD = patient.status === 'Admitted';
+                        const patName = patient.name || patient.patient_name || patient.patientName || 'Patient';
+                        const patMrn = patient.mrn || patient.patient_mrn || patient.patientMrn || patient.id || 'N/A';
+
+                        return (
+                        <TableRow key={patient.id} className="group border-slate-100 hover:bg-slate-50/70 transition-colors">
+                          <TableCell className="sticky left-0 bg-white group-hover:bg-slate-50 z-10 font-bold text-medical-blue whitespace-nowrap shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">
+                            {patMrn}
+                          </TableCell>
                           <TableCell className={cn(
-                            "font-medium whitespace-nowrap transition-colors duration-150",
-                            (patient.needsAdmission || patient.needs_admission || patient.status === 'Admitting' || patient.status === 'Admitted') 
-                              ? "bg-amber-50/80 border-l-2 border-l-amber-500" 
+                            "sticky left-[110px] bg-white group-hover:bg-slate-50 z-10 font-medium whitespace-nowrap shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)] transition-colors duration-150",
+                            (isPendingIPD || isAdmittedIPD) 
+                              ? "bg-amber-50/60 border-l-2 border-l-amber-500" 
                               : ""
                           )}>
                             <div className="flex flex-col gap-0.5">
-                              <span className="font-medium text-slate-800">{patient.name}</span>
-                              {(patient.needsAdmission || patient.needs_admission || patient.status === 'Admitting' || patient.status === 'Admitted') ? (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-200 max-w-max">
-                                  Transferred to IPD ({patient.status || 'Pending'})
+                              <span className="font-bold text-slate-900 text-sm">{patName}</span>
+                              {(isPendingIPD || isAdmittedIPD) ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-200 max-w-max">
+                                  {isAdmittedIPD ? 'IPD Admitted' : 'Waiting for IPD Bed'}
                                 </span>
                               ) : (patient.status === 'Discharged' || patient.status === 'discharged' || patient.registration_type === 'IPD' || patient.department === 'IPD') ? (
                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-800 border border-purple-200 max-w-max">
-                                  IPD (Discharged Inpatient)
+                                  IPD Discharged
                                 </span>
                               ) : (patient.isReferral || patient.is_referral) ? (
                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-50 text-teal-700 border border-teal-200 max-w-max">
@@ -6471,9 +6588,9 @@ export default function OPD() {
                               ) : null}
                             </div>
                           </TableCell>
-                          <TableCell className="whitespace-nowrap">{patient.age}Y / {patient.gender}</TableCell>
+                          <TableCell className="whitespace-nowrap font-medium text-slate-700">{patient.age || '—'}Y / {patient.gender || '—'}</TableCell>
                           <TableCell className="whitespace-nowrap">
-                            <div className="flex items-center gap-1.5 group">
+                            <div className="flex items-center gap-1.5 group/contact">
                               <span className="font-semibold text-slate-800">
                                 {patient.phone || patient.mobile || patient.contact || patient.phone_number || <span className="text-slate-400 italic font-normal">N/A</span>}
                               </span>
@@ -6494,8 +6611,61 @@ export default function OPD() {
                             </div>
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(patient.created_at || patient.registration_date)}</TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {isAdmittedIPD ? (
+                              <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 text-[10px] gap-1 font-bold">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                Admitted
+                              </Badge>
+                            ) : isPendingIPD ? (
+                              <Badge className="bg-amber-100 text-amber-900 border-amber-300 text-[10px] gap-1 font-bold animate-pulse">
+                                <Clock className="w-3 h-3 text-amber-600" />
+                                Waiting for Bed
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-slate-400 font-medium">Outpatient</span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-1.5 items-center">
+                              {/* Transfer to IPD button */}
+                              {!isAccountant && (
+                                isPendingIPD ? (
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    className="text-amber-800 bg-amber-50 hover:bg-amber-100 border-amber-300 h-8 gap-1 whitespace-nowrap font-bold text-xs" 
+                                    onClick={() => navigate('/ipd')}
+                                    title="Patient is in IPD waiting queue. Click to view IPD Bed Allotment."
+                                  >
+                                    <Clock className="w-3.5 h-3.5 text-amber-600" />
+                                    IPD Queue
+                                  </Button>
+                                ) : isAdmittedIPD ? (
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    className="text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-emerald-300 h-8 gap-1 whitespace-nowrap font-bold text-xs" 
+                                    onClick={() => navigate('/ipd')}
+                                    title="Patient is admitted in IPD. Click to open IPD."
+                                  >
+                                    <Bed className="w-3.5 h-3.5 text-emerald-600" />
+                                    In IPD
+                                  </Button>
+                                ) : (
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    className="text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 hover:text-indigo-900 border-indigo-200 h-8 gap-1 whitespace-nowrap font-bold text-xs shadow-xs" 
+                                    onClick={() => handleTransferToIPD(patient)}
+                                    title="Transfer patient to IPD for inpatient admission and bed allotment"
+                                  >
+                                    <ArrowUpRight className="w-3.5 h-3.5 text-indigo-600" />
+                                    Transfer to IPD
+                                  </Button>
+                                )
+                              )}
+
                               <Button 
                                 variant="ghost" 
                                 size="icon" 
@@ -6642,37 +6812,6 @@ export default function OPD() {
                               >
                                 <FileDown className="w-4 h-4 text-slate-600" />
                               </Button>
-                              {!isAccountant && (
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  className="text-medical-blue h-8 whitespace-nowrap font-bold hover:bg-blue-50" 
-                                  onClick={async () => {
-                                    const confirmTransfer = window.confirm(`Are you sure you want to transfer ${patient.name} to IPD Admission?`);
-                                    if (!confirmTransfer) return;
-                                    try {
-                                      const result = await supabaseService.updatePatient(patient.id, { 
-                                        status: 'Admitting', 
-                                        registrationType: 'OPD/IPD', 
-                                        needsAdmission: true 
-                                      });
-                                      const updatedPatients = patients.map(p => 
-                                        p.id === patient.id ? { ...p, ...result, status: 'Admitting', registrationType: 'OPD/IPD', needsAdmission: true } : p
-                                      );
-                                      setPatients(updatedPatients);
-                                      storage.set(STORAGE_KEYS.PATIENTS, updatedPatients);
-                                      window.dispatchEvent(new CustomEvent('supabase-data-sync', { detail: { table: 'patients', action: 'update' } }));
-                                      toast.success(`${patient.name} marked for IPD Admission. You can now assign a bed in IPD Management.`);
-                                    } catch (err: any) {
-                                      console.error('Error transferring to IPD:', err);
-                                      toast.error('Failed to transfer patient to IPD');
-                                    }
-                                  }}
-                                >
-                                  <ArrowUpRight className="w-4 h-4 mr-1.5" />
-                                  Transfer to IPD
-                                </Button>
-                              )}
                               <Button variant="ghost" size="icon" className="h-8 w-8 text-medical-blue hover:bg-blue-50" title="Edit Patient Details" onClick={() => startEditPatient(patient)}>
                                 <Edit className="w-4 h-4" />
                               </Button>
@@ -6684,7 +6823,8 @@ export default function OPD() {
                             </div>
                           </TableCell>
                         </TableRow>
-                      ))
+                        );
+                      })
                   )}
                 </TableBody>
               </Table>
@@ -6833,29 +6973,34 @@ export default function OPD() {
                             variant="outline" 
                             className={`${
                               apt.payment_status === 'Refunded' 
-                                ? 'bg-slate-100 text-slate-600 border-slate-200' 
-                                : apt.payment_status === 'Paid' 
-                                  ? 'bg-emerald-50 text-emerald-600 border-emerald-100' 
-                                  : 'bg-rose-50 text-rose-600 border-rose-100'
+                                ? 'bg-rose-50 text-rose-600 border-rose-200' 
+                                : apt.payment_status === 'Partially Refunded'
+                                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                  : apt.payment_status === 'Paid' 
+                                    ? 'bg-emerald-50 text-emerald-600 border-emerald-100' 
+                                    : 'bg-rose-50 text-rose-600 border-rose-100'
                             } border-none w-fit py-0.5 px-2 text-[10px] font-bold`}
                           >
                             {apt.payment_status === 'Refunded' 
                               ? 'Refunded' 
-                              : (apt.payment_status || 'Pending') === 'Paid' 
-                                ? 'Paid' 
-                                : 'Pending'
+                              : apt.payment_status === 'Partially Refunded'
+                                ? 'Partially Refunded'
+                                : (apt.payment_status || 'Pending') === 'Paid' 
+                                  ? 'Paid' 
+                                  : 'Pending'
                             }
                           </Badge>
                           <div className="text-[11px] space-y-0.5 text-slate-600 font-medium">
                             <div>Base Fee: <span className="font-semibold text-slate-800">₹{apt.fee || appointmentFee}</span></div>
                             {(apt.discount_amount || apt.discountAmount || 0) > 0 && (
-                              <>
-                                <div className="text-amber-600 font-semibold font-bold">Discount: <span>-₹{apt.discount_amount || apt.discountAmount}</span></div>
-                                <div className="border-t border-slate-100 pt-0.5 text-emerald-600 font-bold">
-                                  Net Paid: <span>₹{Math.max(0, (apt.fee || appointmentFee) - (apt.discount_amount || apt.discountAmount || 0))}</span>
-                                </div>
-                              </>
+                              <div className="text-amber-600 font-semibold">Discount: <span>-₹{apt.discount_amount || apt.discountAmount}</span></div>
                             )}
+                            {(apt.refund_amount || apt.refundAmount || 0) > 0 && (
+                              <div className="text-rose-600 font-semibold">Refunded: <span>-₹{apt.refund_amount || apt.refundAmount}</span></div>
+                            )}
+                            <div className="border-t border-slate-100 pt-0.5 text-emerald-600 font-bold">
+                              Net: <span>₹{Math.max(0, (Number(apt.fee || appointmentFee) - Number(apt.discount_amount || apt.discountAmount || 0)) - Number(apt.refund_amount || apt.refundAmount || (apt.payment_status === 'Refunded' ? (Number(apt.fee || appointmentFee) - Number(apt.discount_amount || apt.discountAmount || 0)) : 0)))}</span>
+                            </div>
                           </div>
                         </div>
                       </TableCell>
@@ -6866,25 +7011,32 @@ export default function OPD() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2 items-center">
-                          {!isDoctor && (apt.payment_status === 'Paid' ? (
+                          {!isDoctor && ((apt.payment_status === 'Paid' || apt.payment_status === 'Partially Refunded') ? (
                             <Button 
                               variant="outline" 
                               size="sm" 
-                              className="h-8 text-[10px] font-black uppercase tracking-wider text-amber-600 border-amber-100 hover:bg-amber-50 px-2"
-                              onClick={() => handleRefundAppointment(apt.id)}
+                              className="h-8 text-[11px] font-bold text-amber-700 border-amber-300 hover:bg-amber-50 bg-amber-50/40 px-2.5 gap-1 shadow-xs"
+                              onClick={() => openRefundModal(apt)}
+                              title="Process full or partial refund for this consultation"
                             >
-                              Refund ₹{Math.max(0, (apt.fee || appointmentFee) - (apt.discount_amount || apt.discountAmount || 0))}
+                              <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+                              Refund (Part/Full)
                             </Button>
                           ) : apt.payment_status !== 'Refunded' ? (
                             <Button 
                               variant="outline" 
                               size="sm" 
-                              className="h-8 text-[10px] font-black uppercase tracking-wider text-emerald-600 border-emerald-100 hover:bg-emerald-50 bg-emerald-50/50 px-2"
+                              className="h-8 text-[11px] font-bold text-emerald-700 border-emerald-300 hover:bg-emerald-50 bg-emerald-50/50 px-2.5 gap-1 shadow-xs"
                               onClick={() => handleOpenPaymentModal(apt)}
                             >
+                              <CreditCard className="w-3.5 h-3.5 text-emerald-600" />
                               Collect ₹{Math.max(0, (apt.fee || appointmentFee) - (apt.discount_amount || apt.discountAmount || 0))}
                             </Button>
-                          ) : null)}
+                          ) : (
+                            <Badge variant="outline" className="bg-rose-50 text-rose-700 border-rose-200 text-[10px] font-bold px-2 py-1">
+                              Refunded {apt.refund_amount ? `(₹${apt.refund_amount})` : ''}
+                            </Badge>
+                          ))}
                           {(canUserEditClinicalData(currentUser?.role) || isReceptionist) && (
                             <Button 
                               variant="ghost" 
@@ -9719,6 +9871,174 @@ export default function OPD() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Part / Full Refund Modal */}
+      <Dialog open={isRefundModalOpen} onOpenChange={(open) => { if (!open) { setIsRefundModalOpen(false); setRefundTargetApt(null); } }}>
+        <DialogContent className="sm:max-w-[460px] bg-white rounded-2xl p-6 shadow-2xl border border-slate-200">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-700 font-extrabold text-base">
+              <RotateCcw className="w-5 h-5 text-amber-600" />
+              OPD Consultation Refund (Part / Full)
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              Enter the refund amount to process. This will immediately update the OPD Register, Daily Collections, and Billing ledger.
+            </DialogDescription>
+          </DialogHeader>
+          {refundTargetApt && (() => {
+            const baseFee = Number(refundTargetApt.fee || appointmentFee || 500);
+            const disc = Number(refundTargetApt.discount_amount || refundTargetApt.discountAmount || 0);
+            const netPaid = Math.max(0, baseFee - disc);
+            const prevRefund = Number(refundTargetApt.refund_amount || refundTargetApt.refundAmount || 0);
+            const maxRefundable = Math.max(0, netPaid - prevRefund);
+            const inputVal = parseFloat(refundAmountInput) || 0;
+            const willBeFull = (prevRefund + inputVal) >= netPaid && inputVal > 0;
+
+            const patName = refundTargetApt.patientName || refundTargetApt.patients?.name || 
+              patients.find(p => isPatientIdMatch(p.id, refundTargetApt.patientId || refundTargetApt.patient_id))?.name || 'Patient';
+            const patMrn = refundTargetApt.patientMrn || refundTargetApt.patients?.mrn || 
+              patients.find(p => isPatientIdMatch(p.id, refundTargetApt.patientId || refundTargetApt.patient_id))?.mrn || 'N/A';
+
+            return (
+              <div className="py-2 space-y-4">
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1.5 text-xs">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-medium">Patient:</span>
+                    <span className="font-bold text-slate-900">{patName} (MRN: {patMrn})</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-medium">Doctor:</span>
+                    <span className="font-semibold text-slate-800">{refundTargetApt.doctor || 'OPD Consultant'}</span>
+                  </div>
+                  <div className="flex justify-between items-center border-t border-slate-200 pt-1.5">
+                    <span className="text-slate-500 font-medium">Original Net Fee:</span>
+                    <span className="font-bold text-slate-800">₹{netPaid}</span>
+                  </div>
+                  {prevRefund > 0 && (
+                    <div className="flex justify-between items-center text-amber-700 font-semibold">
+                      <span>Previously Refunded:</span>
+                      <span>-₹{prevRefund}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center border-t border-slate-200 pt-1.5 text-emerald-700 font-extrabold text-sm">
+                    <span>Max Refundable Now:</span>
+                    <span>₹{maxRefundable}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      Refund Amount (₹) <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2.5 text-slate-400 font-bold">₹</span>
+                      <Input
+                        type="number"
+                        min="1"
+                        max={maxRefundable}
+                        value={refundAmountInput}
+                        onChange={(e) => setRefundAmountInput(e.target.value)}
+                        placeholder="Enter refund amount"
+                        className="pl-7 h-10 font-bold text-slate-800 text-sm focus:ring-amber-500"
+                      />
+                    </div>
+                    <div className="flex justify-between items-center mt-1.5">
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setRefundAmountInput((maxRefundable / 2).toFixed(0))}
+                          className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+                        >
+                          50% (₹{(maxRefundable / 2).toFixed(0)})
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setRefundAmountInput(maxRefundable.toString())}
+                          className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-800 hover:underline"
+                        >
+                          Full Refund (₹{maxRefundable})
+                        </button>
+                      </div>
+                      <span className="text-[11px] font-bold text-slate-500">
+                        {willBeFull ? (
+                          <span className="text-rose-600">Type: Full Refund</span>
+                        ) : inputVal > 0 ? (
+                          <span className="text-amber-700">Type: Partial Refund</span>
+                        ) : ''}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Refund Mode</label>
+                      <Select value={refundModeInput} onValueChange={setRefundModeInput}>
+                        <SelectTrigger className="h-9 text-xs">
+                          <SelectValue placeholder="Mode" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Cash">Cash</SelectItem>
+                          <SelectItem value="UPI">UPI / Online</SelectItem>
+                          <SelectItem value="Card">Card</SelectItem>
+                          <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Refunded By</label>
+                      <Input
+                        disabled
+                        value={currentUser?.name || 'Current User'}
+                        className="h-9 text-xs bg-slate-50 text-slate-600"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Reason / Note</label>
+                    <Input
+                      value={refundReasonInput}
+                      onChange={(e) => setRefundReasonInput(e.target.value)}
+                      placeholder="e.g., Doctor unavailable, Patient requested refund"
+                      className="h-9 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-2 border-t border-slate-100">
+                  <Button
+                    variant="outline"
+                    className="flex-1 h-9 text-xs font-semibold"
+                    onClick={() => { setIsRefundModalOpen(false); setRefundTargetApt(null); }}
+                    disabled={isProcessingRefund}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    className="flex-1 h-9 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white gap-1.5 shadow-sm"
+                    onClick={handleProcessRefund}
+                    disabled={isProcessingRefund || !refundAmountInput || parseFloat(refundAmountInput) <= 0}
+                  >
+                    {isProcessingRefund ? (
+                      <>
+                        <RotateCcw className="w-3.5 h-3.5 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Confirm Refund (₹{refundAmountInput || 0})
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

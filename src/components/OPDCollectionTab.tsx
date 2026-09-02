@@ -68,6 +68,7 @@ export function OPDCollectionTab({
         fee: Number(apt.fee || 500),
         discountAmount: Number(apt.discount_amount || apt.discountAmount || 0),
         discountGivenBy: apt.discount_given_by || apt.discountGivenBy || null,
+        refundAmount: Number(apt.refund_amount || apt.refundAmount || (apt.payment_status === 'Refunded' ? (Number(apt.fee || 500) - Number(apt.discount_amount || apt.discountAmount || 0)) : 0)),
         refundGivenBy: apt.refund_given_by || apt.refundGivenBy || null,
         paymentStatus: apt.payment_status || 'Pending'
       };
@@ -86,8 +87,8 @@ export function OPDCollectionTab({
   // Filter mapped appointments by date range and selected doctor
   const filteredApts = useMemo(() => {
     return mappedApts.filter((apt: any) => {
-      // Must be Paid or Refunded to show in the collections report
-      if (apt.paymentStatus !== 'Paid' && apt.paymentStatus !== 'Refunded') return false;
+      // Must be Paid, Refunded, or Partially Refunded to show in the collections report
+      if (apt.paymentStatus !== 'Paid' && apt.paymentStatus !== 'Refunded' && apt.paymentStatus !== 'Partially Refunded') return false;
       
       // Date filter
       if (opdStartDate && apt.dateStr < opdStartDate) return false;
@@ -111,12 +112,11 @@ export function OPDCollectionTab({
       transactionsCount++;
       grossCollection += apt.fee;
       totalDiscounts += apt.discountAmount;
-      if (apt.paymentStatus === 'Refunded') {
-        totalRefunds += (apt.fee - apt.discountAmount);
-      }
+      const rf = apt.refundAmount || (apt.paymentStatus === 'Refunded' ? (apt.fee - apt.discountAmount) : 0);
+      totalRefunds += rf;
     });
 
-    const netCollection = grossCollection - totalDiscounts - totalRefunds;
+    const netCollection = Math.max(0, grossCollection - totalDiscounts - totalRefunds);
 
     return {
       grossCollection,
@@ -148,14 +148,12 @@ export function OPDCollectionTab({
       }
       
       const aptNet = apt.fee - apt.discountAmount;
+      const rf = apt.refundAmount || (apt.paymentStatus === 'Refunded' ? aptNet : 0);
       docs[docName].patientsCount += 1;
       docs[docName].gross += apt.fee;
       docs[docName].discounts += apt.discountAmount;
-      if (apt.paymentStatus === 'Refunded') {
-        docs[docName].refunds += aptNet;
-      } else {
-        docs[docName].net += aptNet;
-      }
+      docs[docName].refunds += rf;
+      docs[docName].net += Math.max(0, aptNet - rf);
     });
     
     return Object.values(docs);
@@ -402,7 +400,18 @@ export function OPDCollectionTab({
                           )}
                         </TableCell>
                         <TableCell className="text-right text-xs font-bold text-slate-800">
-                          ₹{tx.paymentStatus === 'Refunded' ? 0 : (tx.fee - tx.discountAmount)}
+                          {(() => {
+                            const rf = tx.refundAmount || (tx.paymentStatus === 'Refunded' ? (tx.fee - tx.discountAmount) : 0);
+                            const net = Math.max(0, tx.fee - tx.discountAmount - rf);
+                            return (
+                              <div className="flex flex-col items-end">
+                                <span>₹{net}</span>
+                                {rf > 0 && (
+                                  <span className="text-[9px] text-rose-500 font-semibold">Rfnd: -₹{rf}</span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </TableCell>
                         <TableCell className="text-center">
                           <div className="flex flex-col items-center justify-center">
@@ -410,13 +419,15 @@ export function OPDCollectionTab({
                               variant="secondary" 
                               className={`text-[9px] uppercase font-bold ${
                                 tx.paymentStatus === 'Refunded' 
-                                  ? 'bg-amber-50 text-amber-600 hover:bg-amber-100 border-amber-200' 
-                                  : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+                                  ? 'bg-rose-50 text-rose-600 hover:bg-rose-100 border-rose-200' 
+                                  : tx.paymentStatus === 'Partially Refunded'
+                                    ? 'bg-amber-50 text-amber-700 hover:bg-amber-100 border-amber-200'
+                                    : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
                               }`}
                             >
                               {tx.paymentStatus}
                             </Badge>
-                            {tx.paymentStatus === 'Refunded' && tx.refundGivenBy && (
+                            {(tx.paymentStatus === 'Refunded' || tx.paymentStatus === 'Partially Refunded') && tx.refundGivenBy && (
                               <span className="text-[8px] text-amber-600 leading-none mt-1">By: {tx.refundGivenBy}</span>
                             )}
                           </div>
