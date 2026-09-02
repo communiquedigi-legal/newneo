@@ -54,6 +54,9 @@ export interface AdmissionSheetData {
   otherAdmissionType?: string;
   consultantIncharge: string;
   referredBy: string;
+  referralHospital?: string;
+  referralReferenceNo?: string;
+  referralContact?: string;
   provisionalDiagnosis: string;
   finalDiagnosis: string;
   result: 'Improved' | 'DOR' | 'LAMA' | 'Absconded' | 'Expired' | '';
@@ -490,7 +493,11 @@ export function getAdmissionSheetHtml(data: AdmissionSheetData, hospitalInfo?: a
       </div>
       <div class="col-2">
         <span class="field-label">Referred by</span>
-        <span class="field-fill">${data.referredBy || ''}</span>
+        <span class="field-fill">${[
+          data.referredBy,
+          data.referralHospital ? `(${data.referralHospital})` : '',
+          data.referralReferenceNo ? `[Ref: ${data.referralReferenceNo}]` : ''
+        ].filter(Boolean).join(' ')}</span>
       </div>
     </div>
 
@@ -786,7 +793,10 @@ export const AdmissionSheetModal: React.FC<AdmissionSheetModalProps> = ({
         dateOfDischarge: adm.dischargeDate || '',
         typeOfAdmission: (adm.type as any) || (p.tpaId ? 'TPA' : 'Paid'),
         consultantIncharge: doctor,
-        referredBy: p.referredBy || 'Self / General OPD',
+        referredBy: p.referredBy || p.referred_by || adm.referredBy || adm.referred_by || 'Self / General OPD',
+        referralHospital: p.referralHospital || p.referral_hospital || adm.referralHospital || '',
+        referralReferenceNo: p.referralReferenceNo || p.referral_reference_no || adm.referralReferenceNo || '',
+        referralContact: p.referralContact || p.referral_contact || adm.referralContact || '',
         provisionalDiagnosis: provDiag,
         finalDiagnosis: adm.finalDiagnosis || '',
         result: (adm.result as any) || '',
@@ -1194,12 +1204,32 @@ export const AdmissionSheetModal: React.FC<AdmissionSheetModalProps> = ({
                     </div>
 
                     <div>
-                      <Label className="text-xs font-bold text-slate-700">Referred by</Label>
+                      <Label className="text-xs font-bold text-slate-700">Referred by (Doctor / Source)</Label>
                       <Input 
                         value={formData.referredBy} 
                         onChange={(e) => setFormData({ ...formData, referredBy: e.target.value })} 
                         className="mt-1.5 h-10 text-xs"
-                        placeholder="e.g. Self / OPD / Dr. Referral"
+                        placeholder="e.g. Dr. Rajesh Verma / Self / OPD"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-bold text-slate-700">Referring Hospital / Clinic</Label>
+                      <Input 
+                        value={formData.referralHospital || ''} 
+                        onChange={(e) => setFormData({ ...formData, referralHospital: e.target.value })} 
+                        className="mt-1.5 h-10 text-xs"
+                        placeholder="e.g. Verma PolyClinic / City Care"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs font-bold text-slate-700">Reference / Slip No.</Label>
+                      <Input 
+                        value={formData.referralReferenceNo || ''} 
+                        onChange={(e) => setFormData({ ...formData, referralReferenceNo: e.target.value })} 
+                        className="mt-1.5 h-10 text-xs font-mono"
+                        placeholder="e.g. REF-2026-092"
                       />
                     </div>
 

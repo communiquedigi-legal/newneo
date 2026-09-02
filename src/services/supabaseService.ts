@@ -1870,6 +1870,20 @@ export function normalizePatient(p: any) {
     is_referral: isRef,
     referredBy: refBy,
     referred_by: refBy,
+    referralHospital: p.referral_hospital || p.referralHospital || null,
+    referral_hospital: p.referral_hospital || p.referralHospital || null,
+    referralReferenceNo: p.referral_reference_no || p.referralReferenceNo || p.referenceNo || p.reference_no || null,
+    referral_reference_no: p.referral_reference_no || p.referralReferenceNo || p.referenceNo || p.reference_no || null,
+    referralContact: p.referral_contact || p.referralContact || null,
+    referral_contact: p.referral_contact || p.referralContact || null,
+    referralReason: p.referral_reason || p.referralReason || null,
+    referral_reason: p.referral_reason || p.referralReason || null,
+    referralType: p.referral_type || p.referralType || (isRef ? 'Doctor' : null),
+    referral_type: p.referral_type || p.referralType || (isRef ? 'Doctor' : null),
+    referralDate: p.referral_date || p.referralDate || null,
+    referral_date: p.referral_date || p.referralDate || null,
+    referralNotes: p.referral_notes || p.referralNotes || null,
+    referral_notes: p.referral_notes || p.referralNotes || null,
     urgency: p.urgency || 'Routine'
   };
 }

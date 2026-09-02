@@ -31,7 +31,12 @@ import {
   UserCheck,
   Clock,
   ShieldAlert,
-  X
+  X,
+  ArrowUpRight,
+  Share2,
+  FileCheck,
+  PhoneCall,
+  Building2
 } from 'lucide-react';
 import VisitingConsultants from './VisitingConsultants';
 import { Button } from '@/components/ui/button';
@@ -77,6 +82,10 @@ import { printDailyVitalsAndAdvice } from '@/lib/dailyVitalsPrint';
 import { AdmissionSheetModal, printOfficialAdmissionSheet } from './AdmissionSheetModal';
 import { PoorPrognosisConsentModal, printPoorPrognosisConsent } from './PoorPrognosisConsentModal';
 import { GeneralConsentModal } from './GeneralConsentModal';
+import { printReferralSlip, printReferralRegister, ReferralCasePrintData } from '@/lib/referralPrint';
+import { DischargeSummaryModal } from './DischargeSummaryModal';
+import { printDischargeSummary, DischargeSummaryPrintData } from '@/lib/dischargePrint';
+import { sendWhatsAppMessage } from '@/lib/whatsappService';
 
 interface AdmissionFormDataPayload {
   patient_id: string;
@@ -461,7 +470,16 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
     ward: '', 
     bedId: '',
     urgency: 'Routine',
-    caseType: 'General'
+    caseType: 'General',
+    isReferral: false,
+    referralType: 'Doctor',
+    referredBy: '',
+    referralHospital: '',
+    referralReferenceNo: '',
+    referralContact: '',
+    referralReason: '',
+    referralDate: new Date().toISOString().substring(0, 10),
+    referralNotes: ''
   });
 
   const currentUser = useMemo(() => {
@@ -497,7 +515,25 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
   const [deleteBedUnassignPatient, setDeleteBedUnassignPatient] = useState(true);
 
   // Tabs state
-  const [activeTab, setActiveTab] = useState<'registration' | 'beds' | 'surgery' | 'discharge' | 'shifting' | 'lama-death' | 'initial-evaluation' | 'specialist-consultations' | 'poor-prognosis' | 'general-consent'>('beds');
+  const [activeTab, setActiveTab] = useState<'registration' | 'beds' | 'referrals' | 'surgery' | 'discharge' | 'shifting' | 'lama-death' | 'initial-evaluation' | 'specialist-consultations' | 'poor-prognosis' | 'general-consent'>('beds');
+
+  // Referral Processing & Register States
+  const [referralSearchTerm, setReferralSearchTerm] = useState('');
+  const [referralStatusFilter, setReferralStatusFilter] = useState<'all' | 'admitted' | 'discharged' | 'opd'>('all');
+  const [referralTypeFilter, setReferralTypeFilter] = useState<string>('all');
+  const [isEditReferralOpen, setIsEditReferralOpen] = useState(false);
+  const [editingReferralPatient, setEditingReferralPatient] = useState<any>(null);
+  const [editingReferralForm, setEditingReferralForm] = useState({
+    isReferral: true,
+    referredBy: '',
+    referralHospital: '',
+    referralReferenceNo: '',
+    referralContact: '',
+    referralReason: '',
+    referralType: 'Doctor',
+    referralDate: new Date().toISOString().substring(0, 10),
+    referralNotes: ''
+  });
 
   // Official Admission Sheet & LAMA modal
   const [isAdmissionSheetOpen, setIsAdmissionSheetOpen] = useState(false);
@@ -611,6 +647,8 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
   const [showDischargeSearchDropdown, setShowDischargeSearchDropdown] = useState(false);
   const [bypassDues, setBypassDues] = useState(false);
   const [dischargeRightPaneView, setDischargeRightPaneView] = useState<'timeline' | 'report'>('timeline');
+  const [dischargeTabFilter, setDischargeTabFilter] = useState<'all' | 'inpatients' | 'routine' | 'lama' | 'deceased'>('all');
+  const [dischargeSearchQuery, setDischargeSearchQuery] = useState('');
   const [patientChecklists, setPatientChecklists] = useState<Record<string, any>>(() => {
     try {
       const stored = localStorage.getItem('hms_discharge_checklists');
@@ -619,6 +657,252 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
       return {};
     }
   });
+
+  // Comprehensive list of active IPD inpatients eligible for discharge
+  const activeInpatientsForDischarge = useMemo(() => {
+    const map = new Map<string, any>();
+
+    // 1. From admissions where status is 'Admitted'
+    admissions.filter(a => a.status === 'Admitted').forEach(adm => {
+      const pid = String(adm.patient_id || adm.patientId);
+      const p = patients.find(pat => String(pat.id) === pid) || MOCK_PATIENTS.find(pat => String(pat.id) === pid);
+      if (p && !map.has(p.id)) {
+        const bed = beds.find(b => String(b.patient_id || b.patientId) === String(p.id) || String(b.id) === String(adm.bed_id));
+        map.set(p.id, {
+          id: p.id,
+          patientId: p.id,
+          patient_id: p.id,
+          admissionId: adm.id,
+          patientName: p.name,
+          mrn: p.mrn || 'MRN-IPD-ACTIVE',
+          age: p.age,
+          gender: p.gender,
+          phone: p.phone,
+          address: p.address,
+          ward: adm.ward || bed?.ward || 'General Ward',
+          bedNumber: bed?.bed_number || bed?.number || adm.bed_id || 'Bed',
+          admissionDate: adm.admission_date || p.created_at || new Date().toISOString(),
+          dischargeDate: new Date().toISOString(),
+          dischargeType: 'Active Inpatient',
+          primaryDiagnosis: adm.diagnosis || p.primaryDiagnosis || p.diagnosis || 'Inpatient Clinical Care',
+          clinicalSummary: 'Patient currently undergoing inpatient treatment and monitoring.',
+          dischargeVitals: 'BP: 120/80 mmHg | Pulse: 76 bpm | SpO2: 98% RA',
+          conditionAtDischarge: 'Hemodynamically Stable, Under Observation',
+          attendingDoctor: (p.attending_doctor_id || p.attendingDoctorId) ? (users.find(u => String(u.id) === String(p.attending_doctor_id || p.attendingDoctorId))?.name || 'Dr. Rajesh Sharma') : 'Dr. Rajesh Sharma',
+          dischargeBy: (p.attending_doctor_id || p.attendingDoctorId) ? (users.find(u => String(u.id) === String(p.attending_doctor_id || p.attendingDoctorId))?.name || 'Dr. Rajesh Sharma') : 'Dr. Rajesh Sharma',
+          status: 'Admitted',
+          patientObj: p,
+          admissionObj: adm,
+          bedObj: bed
+        });
+      }
+    });
+
+    // 2. From beds occupied
+    beds.filter(b => b.status === 'Occupied' && (b.patient_id || b.patientId)).forEach(bed => {
+      const pid = String(bed.patient_id || bed.patientId);
+      if (!map.has(pid)) {
+        const p = patients.find(pat => String(pat.id) === pid) || MOCK_PATIENTS.find(pat => String(pat.id) === pid);
+        if (p) {
+          const adm = admissions.find(a => String(a.patient_id || a.patientId) === String(p.id) && a.status === 'Admitted');
+          map.set(p.id, {
+            id: p.id,
+            patientId: p.id,
+            patient_id: p.id,
+            admissionId: adm?.id,
+            patientName: p.name,
+            mrn: p.mrn || 'MRN-IPD-ACTIVE',
+            age: p.age,
+            gender: p.gender,
+            phone: p.phone,
+            address: p.address,
+            ward: bed.ward || 'General Ward',
+            bedNumber: bed.bed_number || bed.number,
+            admissionDate: adm?.admission_date || p.created_at || new Date().toISOString(),
+            dischargeDate: new Date().toISOString(),
+            dischargeType: 'Active Inpatient',
+            primaryDiagnosis: adm?.diagnosis || p.primaryDiagnosis || p.diagnosis || 'Inpatient Clinical Care',
+            clinicalSummary: 'Patient currently undergoing inpatient treatment and monitoring.',
+            dischargeVitals: 'BP: 120/80 mmHg | Pulse: 76 bpm | SpO2: 98% RA',
+            conditionAtDischarge: 'Hemodynamically Stable, Under Observation',
+            attendingDoctor: (p.attending_doctor_id || p.attendingDoctorId) ? (users.find(u => String(u.id) === String(p.attending_doctor_id || p.attendingDoctorId))?.name || 'Dr. Rajesh Sharma') : 'Dr. Rajesh Sharma',
+            dischargeBy: (p.attending_doctor_id || p.attendingDoctorId) ? (users.find(u => String(u.id) === String(p.attending_doctor_id || p.attendingDoctorId))?.name || 'Dr. Rajesh Sharma') : 'Dr. Rajesh Sharma',
+            status: 'Admitted',
+            patientObj: p,
+            admissionObj: adm,
+            bedObj: bed
+          });
+        }
+      }
+    });
+
+    // 3. From patients with status 'Admitted' or IPD department/registration_type
+    patients.filter(p => (p.status === 'Admitted' || p.department === 'IPD' || p.registration_type === 'IPD' || p.needsAdmission) && p.status !== 'Discharged').forEach(p => {
+      if (!map.has(p.id)) {
+        const adm = admissions.find(a => String(a.patient_id || a.patientId) === String(p.id) && a.status === 'Admitted');
+        const bed = beds.find(b => String(b.patient_id || b.patientId) === String(p.id));
+        map.set(p.id, {
+          id: p.id,
+          patientId: p.id,
+          patient_id: p.id,
+          admissionId: adm?.id,
+          patientName: p.name,
+          mrn: p.mrn || 'MRN-IPD-ACTIVE',
+          age: p.age,
+          gender: p.gender,
+          phone: p.phone,
+          address: p.address,
+          ward: adm?.ward || bed?.ward || 'General Ward',
+          bedNumber: bed?.bed_number || bed?.number || 'Pending Bed',
+          admissionDate: adm?.admission_date || p.created_at || new Date().toISOString(),
+          dischargeDate: new Date().toISOString(),
+          dischargeType: 'Active Inpatient',
+          primaryDiagnosis: adm?.diagnosis || p.primaryDiagnosis || p.diagnosis || 'Inpatient Clinical Care',
+          clinicalSummary: 'Patient currently undergoing inpatient treatment and monitoring.',
+          dischargeVitals: 'BP: 120/80 mmHg | Pulse: 76 bpm | SpO2: 98% RA',
+          conditionAtDischarge: 'Hemodynamically Stable, Under Observation',
+          attendingDoctor: (p.attending_doctor_id || p.attendingDoctorId) ? (users.find(u => String(u.id) === String(p.attending_doctor_id || p.attendingDoctorId))?.name || 'Dr. Rajesh Sharma') : 'Dr. Rajesh Sharma',
+          dischargeBy: (p.attending_doctor_id || p.attendingDoctorId) ? (users.find(u => String(u.id) === String(p.attending_doctor_id || p.attendingDoctorId))?.name || 'Dr. Rajesh Sharma') : 'Dr. Rajesh Sharma',
+          status: 'Admitted',
+          patientObj: p,
+          admissionObj: adm,
+          bedObj: bed
+        });
+      }
+    });
+
+    return Array.from(map.values());
+  }, [admissions, beds, patients, users]);
+
+  // Comprehensive list of all discharged IPD patients
+  const allDischargedPatientsList = useMemo(() => {
+    const map = new Map<string, any>();
+
+    // 1. From dischargeSummaries
+    dischargeSummaries.forEach(s => {
+      const pid = String(s.patientId || s.patient_id);
+      const p = patients.find(pat => String(pat.id) === pid) || MOCK_PATIENTS.find(pat => String(pat.id) === pid);
+      const adm = admissions.find(a => String(a.id) === String(s.admissionId || s.admission_id) || String(a.patient_id || a.patientId) === pid);
+      const key = s.id || pid;
+      map.set(key, {
+        id: s.id || `disch-${pid}`,
+        patientId: pid,
+        admissionId: s.admissionId || s.admission_id || adm?.id,
+        patientName: s.patientName || p?.name || 'Inpatient',
+        mrn: s.mrn || p?.mrn || 'MRN-IPD-DISCHARGED',
+        age: s.age || p?.age || 'Adult',
+        gender: s.gender || p?.gender || '',
+        phone: s.phone || p?.phone || '',
+        address: s.address || p?.address || '',
+        ward: s.ward || adm?.ward || 'General Ward',
+        bedNumber: s.bedNumber || s.bed_id || adm?.bed_id || 'Bed-01',
+        admissionDate: s.admissionDate || s.admission_date || adm?.admission_date || p?.created_at,
+        dischargeDate: s.dischargeDate || s.discharge_date || new Date().toISOString(),
+        dischargeType: s.dischargeType || s.discharge_type || 'Routine / Improved',
+        dischargeBy: s.dischargeBy || s.discharge_by || 'Dr. Rajesh Sharma',
+        primaryDiagnosis: s.primaryDiagnosis || s.primary_diagnosis || adm?.diagnosis || 'Acute Medical Management',
+        secondaryDiagnosis: s.secondaryDiagnosis || s.secondary_diagnosis || '',
+        operativeProcedure: s.operativeProcedure || s.operative_procedure || '',
+        clinicalSummary: s.clinicalSummary || s.clinical_summary || 'Patient received medical treatment and showed satisfactory clinical recovery.',
+        dischargeVitals: s.dischargeVitals || s.discharge_vitals || 'BP: 120/80 mmHg | Pulse: 76 bpm | SpO2: 98% RA',
+        conditionAtDischarge: s.conditionAtDischarge || s.condition_at_discharge || 'Hemodynamically Stable, Afebrile, Ambulatory',
+        dietaryAdvice: s.dietaryAdvice || s.dietary_advice || 'Soft nutritious diet. Drink 2.5-3L water daily.',
+        emergencyWarningSigns: s.emergencyWarningSigns || s.emergency_warning_signs || 'High fever (>101°F), severe abdominal pain, persistent vomiting, shortness of breath.',
+        medications: s.medications || '',
+        followUpDate: s.followUpDate || s.follow_up_date || '',
+        relativeName: s.relativeName,
+        relativeContact: s.relativeContact,
+        lamaReason: s.lamaReason,
+        riskExplained: s.riskExplained,
+        witnessName: s.witnessName,
+        timeOfDeath: s.timeOfDeath,
+        causeOfDeathDirect: s.causeOfDeathDirect,
+        causeOfDeathAntecedent: s.causeOfDeathAntecedent,
+        causeOfDeathUnderlying: s.causeOfDeathUnderlying,
+        deathCertNo: s.deathCertNo,
+        bodyHandedOverTo: s.bodyHandedOverTo,
+        patientObj: p,
+        admissionObj: adm,
+        summaryObj: s
+      });
+    });
+
+    // 2. From admissions with status 'Discharged'
+    admissions.filter(a => a.status === 'Discharged').forEach(adm => {
+      const pid = String(adm.patient_id || adm.patientId);
+      const alreadyHas = Array.from(map.values()).some(item => String(item.patientId) === pid);
+      if (!alreadyHas) {
+        const p = patients.find(pat => String(pat.id) === pid) || MOCK_PATIENTS.find(pat => String(pat.id) === pid);
+        const key = `adm-disch-${adm.id}`;
+        map.set(key, {
+          id: key,
+          patientId: pid,
+          admissionId: adm.id,
+          patientName: p?.name || 'Inpatient',
+          mrn: p?.mrn || 'MRN-IPD-DISCHARGED',
+          age: p?.age || 'Adult',
+          gender: p?.gender || '',
+          phone: p?.phone || '',
+          address: p?.address || '',
+          ward: adm.ward || 'General Ward',
+          bedNumber: adm.bed_id || 'Bed-01',
+          admissionDate: adm.admission_date || p?.created_at,
+          dischargeDate: adm.discharge_date || adm.updated_at || new Date().toISOString(),
+          dischargeType: 'Routine / Improved',
+          dischargeBy: 'Dr. Rajesh Sharma',
+          primaryDiagnosis: adm.diagnosis || 'Post-Treatment Recovery',
+          clinicalSummary: 'Patient admitted and managed according to clinical protocol. Recovered well and fit for home discharge.',
+          dischargeVitals: 'BP: 120/80 mmHg | Pulse: 74 bpm | SpO2: 99% RA',
+          conditionAtDischarge: 'Hemodynamically Stable, Afebrile, Ambulatory',
+          dietaryAdvice: 'Soft nutritious diet. Hydrate well (2.5-3L water/day).',
+          emergencyWarningSigns: 'High fever, acute pain, or breathlessness.',
+          medications: 'Tab. Paracetamol 650mg SOS\nTab. Pantoprazole 40mg OD Before Breakfast (5 Days)',
+          followUpDate: new Date(Date.now() + 86400000 * 7).toISOString(),
+          patientObj: p,
+          admissionObj: adm
+        });
+      }
+    });
+
+    // 3. From patients with status 'Discharged'
+    patients.filter(p => p.status === 'Discharged' && (p.department === 'IPD' || p.registration_type === 'IPD' || p.mrn?.startsWith('MRN-IPD'))).forEach(p => {
+      const pid = String(p.id);
+      const alreadyHas = Array.from(map.values()).some(item => String(item.patientId) === pid);
+      if (!alreadyHas) {
+        const adm = admissions.find(a => String(a.patient_id || a.patientId) === pid);
+        const key = `pat-disch-${p.id}`;
+        map.set(key, {
+          id: key,
+          patientId: pid,
+          admissionId: adm?.id,
+          patientName: p.name,
+          mrn: p.mrn || 'MRN-IPD-DISCHARGED',
+          age: p.age,
+          gender: p.gender,
+          phone: p.phone,
+          address: p.address,
+          ward: adm?.ward || 'General Ward',
+          bedNumber: adm?.bed_id || 'Bed-01',
+          admissionDate: adm?.admission_date || p.created_at,
+          dischargeDate: p.updated_at || new Date().toISOString(),
+          dischargeType: 'Routine / Improved',
+          dischargeBy: 'Dr. Rajesh Sharma',
+          primaryDiagnosis: p.primaryDiagnosis || adm?.diagnosis || 'Inpatient Care Completed',
+          clinicalSummary: 'Patient managed according to clinical protocol and discharged in stable condition.',
+          dischargeVitals: 'BP: 122/80 mmHg | Pulse: 76 bpm | SpO2: 98% RA',
+          conditionAtDischarge: 'Hemodynamically Stable, Afebrile, Ambulatory',
+          dietaryAdvice: 'Soft nutritious diet. Adequate hydration.',
+          emergencyWarningSigns: 'High fever, acute pain, or breathlessness.',
+          medications: 'Continue regular baseline medications.',
+          followUpDate: new Date(Date.now() + 86400000 * 7).toISOString(),
+          patientObj: p,
+          admissionObj: adm
+        });
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => new Date(b.dischargeDate).getTime() - new Date(a.dischargeDate).getTime());
+  }, [dischargeSummaries, admissions, patients]);
 
   // Bed Quick Edit Modal state
   const [isEditBedOpen, setIsEditBedOpen] = useState(false);
@@ -677,6 +961,13 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
     gender: 'Male',
     phone: '',
     address: '',
+    isReferral: false,
+    referralType: 'Doctor',
+    referredBy: '',
+    referralHospital: '',
+    referralReferenceNo: '',
+    referralContact: '',
+    referralReason: '',
     isInsurance: false,
     insuranceProvider: '',
     insurancePolicyNumber: ''
@@ -696,18 +987,33 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
     setIsQuickRegistering(true);
 
     try {
+      const generatedMrn = 'MRN-IPD-' + Math.floor(100 + Math.random() * 900);
       const patientToAdd = {
         name: quickPatient.name,
         age: parseInt(quickPatient.age) || 30,
         gender: quickPatient.gender,
         phone: quickPatient.phone,
         address: quickPatient.address || 'N/A',
-        mrn: 'MRN-IPD-' + Math.floor(100 + Math.random() * 900),
+        mrn: generatedMrn,
         status: 'Admitting',
         needsAdmission: true,
         needs_admission: true,
         registration_type: 'IPD',
         registrationType: 'IPD',
+        is_referral: quickPatient.isReferral,
+        isReferral: quickPatient.isReferral,
+        referred_by: quickPatient.isReferral ? (quickPatient.referredBy || 'Medical Practitioner') : null,
+        referredBy: quickPatient.isReferral ? (quickPatient.referredBy || 'Medical Practitioner') : null,
+        referral_hospital: quickPatient.isReferral ? quickPatient.referralHospital : null,
+        referralHospital: quickPatient.isReferral ? quickPatient.referralHospital : null,
+        referral_reference_no: quickPatient.isReferral ? (quickPatient.referralReferenceNo || `REF-${generatedMrn.replace('MRN-', '')}`) : null,
+        referralReferenceNo: quickPatient.isReferral ? (quickPatient.referralReferenceNo || `REF-${generatedMrn.replace('MRN-', '')}`) : null,
+        referral_contact: quickPatient.isReferral ? quickPatient.referralContact : null,
+        referralContact: quickPatient.isReferral ? quickPatient.referralContact : null,
+        referral_reason: quickPatient.isReferral ? quickPatient.referralReason : null,
+        referralReason: quickPatient.isReferral ? quickPatient.referralReason : null,
+        referral_type: quickPatient.isReferral ? quickPatient.referralType : null,
+        referralType: quickPatient.isReferral ? quickPatient.referralType : null,
         created_at: new Date().toISOString()
       };
       const result = await supabaseService.createPatient(patientToAdd);
@@ -719,7 +1025,14 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
           patientId: result.id,
           ward: prev.ward || 'General Ward A',
           urgency: 'Routine',
-          caseType: 'General'
+          caseType: 'General',
+          isReferral: quickPatient.isReferral,
+          referralType: quickPatient.referralType || 'Doctor',
+          referredBy: quickPatient.referredBy || '',
+          referralHospital: quickPatient.referralHospital || '',
+          referralReferenceNo: quickPatient.referralReferenceNo || (result.referralReferenceNo || ''),
+          referralContact: quickPatient.referralContact || '',
+          referralReason: quickPatient.referralReason || ''
         }));
         setPatientSearchTerm(result.name);
         setQuickPatient({
@@ -728,6 +1041,13 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
           gender: 'Male',
           phone: '',
           address: '',
+          isReferral: false,
+          referralType: 'Doctor',
+          referredBy: '',
+          referralHospital: '',
+          referralReferenceNo: '',
+          referralContact: '',
+          referralReason: '',
           isInsurance: false,
           insuranceProvider: '',
           insurancePolicyNumber: ''
@@ -971,6 +1291,7 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
       return;
     }
 
+    const selectedPat = patients.find(p => p.id === patientId) || MOCK_PATIENTS.find(p => p.id === patientId);
     const bed = beds.find(b => b.patient_id === patientId || b.patientId === patientId);
     const activeAdmission = admissions.find(
       a => (a.patient_id === patientId || a.patientId === patientId) && a.status === 'Admitted'
@@ -990,34 +1311,95 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
       setBeds(beds.map(b => b.id === bed.id ? { ...b, status: 'Available', patient_id: null, patientId: null } : b));
     }
 
-    const summaryData = {
+    const summaryData: any = {
       id: 'sum-' + Date.now(),
       admissionId: admissionId,
       patientId: patientId,
-      dischargeType,
+      patient_id: patientId,
+      patientName: selectedPat?.name || 'Inpatient',
+      mrn: selectedPat?.mrn || 'MRN-IPD',
+      age: selectedPat?.age,
+      gender: selectedPat?.gender,
+      phone: selectedPat?.phone,
+      address: selectedPat?.address,
+      ward: activeAdmission?.ward || bed?.ward || 'General Ward',
+      bedNumber: bed?.bed_number || bed?.number || activeAdmission?.bed_id || 'Bed-01',
+      admissionDate: activeAdmission?.admission_date || selectedPat?.created_at,
+      dischargeType: dischargeType || 'Routine / Improved',
       followUpDate,
       medications,
-      clinicalSummary,
+      clinicalSummary: clinicalSummary || 'Patient managed in IPD and stabilized.',
       dischargeDate: finalDischargeDate,
-      dischargeBy: dischargeForm.dischargeBy || 'Dr. Rajesh Sharma',
-      primaryDiagnosis,
+      dischargeBy: dischargeForm.dischargeBy || getAttendingDoctorName(patientId) || 'Dr. Rajesh Sharma',
+      primaryDiagnosis: primaryDiagnosis || activeAdmission?.diagnosis || selectedPat?.primaryDiagnosis || 'Acute Medical Management',
       secondaryDiagnosis,
       operativeProcedure,
-      dischargeVitals,
+      dischargeVitals: dischargeVitals || 'BP: 120/80 mmHg | Pulse: 76 bpm | SpO2: 98% RA',
       investigationHighlights,
-      conditionAtDischarge,
-      dietaryAdvice,
-      emergencyWarningSigns
+      conditionAtDischarge: conditionAtDischarge || 'Hemodynamically Stable, Afebrile, Ambulatory',
+      dietaryAdvice: dietaryAdvice || 'Soft nutritious diet. Hydrate well (2.5-3L water/day).',
+      emergencyWarningSigns: emergencyWarningSigns || 'High fever (>101°F), severe abdominal pain, persistent vomiting, shortness of breath.'
     };
 
     const savedSummary = await supabaseService.createDischargeSummary(summaryData);
-    if (savedSummary) {
-      setDischargeSummaries([savedSummary, ...dischargeSummaries]);
+    const finalRecord = savedSummary || summaryData;
+    const updatedList = [finalRecord, ...dischargeSummaries.filter(s => s.id !== finalRecord.id && s.patientId !== patientId)];
+    setDischargeSummaries(updatedList);
+    try {
+      localStorage.setItem('hms_discharge_summaries', JSON.stringify(updatedList));
+    } catch (e) {
+      console.error(e);
     }
 
     toast.success('Patient discharged and summary saved!');
-    setDischargedSummaryToShow(summaryData);
+    setDischargedSummaryToShow(finalRecord);
     setIsSummaryDetailsOpen(true);
+  };
+
+  const handleOpenDischargeSummaryModal = (item: any) => {
+    if (!item) return;
+    setDischargedSummaryToShow(item);
+    setIsSummaryDetailsOpen(true);
+  };
+
+  const handleDirectPrintSummary = (item: any) => {
+    if (!item) return;
+    printDischargeSummary({
+      patientName: item.patientName || item.name || 'Inpatient',
+      mrn: item.mrn,
+      age: item.age,
+      gender: item.gender,
+      phone: item.phone,
+      address: item.address,
+      ward: item.ward,
+      bedNumber: item.bedNumber || item.bed_id,
+      admissionDate: item.admissionDate || item.admission_date,
+      dischargeDate: item.dischargeDate || item.discharge_date || new Date().toISOString(),
+      dischargeType: item.dischargeType || 'Routine / Improved',
+      dischargeBy: item.dischargeBy || item.attendingDoctor || 'Dr. Rajesh Sharma',
+      primaryDiagnosis: item.primaryDiagnosis || item.diagnosis || 'Acute Medical Management',
+      secondaryDiagnosis: item.secondaryDiagnosis,
+      operativeProcedure: item.operativeProcedure,
+      clinicalSummary: item.clinicalSummary,
+      dischargeVitals: item.dischargeVitals,
+      investigationHighlights: item.investigationHighlights,
+      conditionAtDischarge: item.conditionAtDischarge,
+      medications: item.medications,
+      dietaryAdvice: item.dietaryAdvice,
+      emergencyWarningSigns: item.emergencyWarningSigns,
+      followUpDate: item.followUpDate,
+      relativeName: item.relativeName,
+      relativeContact: item.relativeContact,
+      lamaReason: item.lamaReason,
+      riskExplained: item.riskExplained,
+      witnessName: item.witnessName,
+      timeOfDeath: item.timeOfDeath,
+      causeOfDeathDirect: item.causeOfDeathDirect,
+      causeOfDeathAntecedent: item.causeOfDeathAntecedent,
+      causeOfDeathUnderlying: item.causeOfDeathUnderlying,
+      deathCertNo: item.deathCertNo,
+      bodyHandedOverTo: item.bodyHandedOverTo
+    });
   };
 
   const handleSaveClinicalNote = async (noteType: 'DOCTOR' | 'NURSE') => {
@@ -1415,6 +1797,17 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
         <Button 
           variant="ghost"
           size="sm" 
+          onClick={() => setActiveTab('referrals')}
+          className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${
+            activeTab === 'referrals' ? 'bg-teal-700 text-white shadow-md' : 'text-teal-900 bg-teal-50 hover:bg-teal-100 border border-teal-200'
+          }`}
+        >
+          <ArrowUpRight className="w-3.5 h-3.5" />
+          Referral Processing & Register
+        </Button>
+        <Button 
+          variant="ghost"
+          size="sm" 
           onClick={() => setActiveTab('surgery')}
           className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${
             activeTab === 'surgery' ? 'bg-teal-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-200/60'
@@ -1752,8 +2145,21 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
                     {isOccupied ? (
                       <div className="space-y-2 text-xs">
                         <div className="p-2.5 bg-blue-50/60 rounded-xl border border-blue-100">
-                          <p className="font-bold text-blue-950">{patient?.name || 'Inpatient'}</p>
+                          <div className="flex items-center justify-between">
+                            <p className="font-bold text-blue-950">{patient?.name || 'Inpatient'}</p>
+                            {(patient?.isReferral || patient?.is_referral || patient?.referredBy || patient?.referred_by) && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-teal-100 text-teal-800 border border-teal-200">
+                                <ArrowUpRight className="w-2.5 h-2.5 text-teal-600" />
+                                Ref
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[10px] text-blue-700 font-mono">MRN: {patient?.mrn || 'IPD-ACTIVE'} • {patient?.age || 'Adult'}y / {patient?.gender || 'Patient'}</p>
+                          {(patient?.isReferral || patient?.is_referral || patient?.referredBy || patient?.referred_by) && (
+                            <p className="text-[9px] text-teal-700 font-medium truncate mt-0.5" title={`Ref: ${patient?.referredBy || patient?.referred_by || 'Doctor'}`}>
+                              Ref: {patient?.referredBy || patient?.referred_by || 'Doctor'}
+                            </p>
+                          )}
                         </div>
                         <div className="flex gap-1.5 flex-wrap">
                           {patient && (
@@ -1781,6 +2187,42 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
                                 <Printer className="w-3 h-3 text-indigo-600 mr-1" />
                                 Vitals Sheet
                               </Button>
+                              {(patient?.isReferral || patient?.is_referral || patient?.referredBy || patient?.referred_by) && (
+                                <Button 
+                                  size="sm" 
+                                  variant="outline" 
+                                  className="h-7 text-[10px] font-bold border-teal-300 text-teal-800 bg-teal-100/60 hover:bg-teal-200"
+                                  title="Print Doctor Referral Slip"
+                                  onClick={() => {
+                                    const activeAdm = admissions.find(a => (String(a.patient_id) === String(patient.id) || String(a.patientId) === String(patient.id)) && a.status === 'Admitted');
+                                    const activeDoc = doctorsList.find(d => String(d.id) === String(activeAdm?.doctor_id || activeAdm?.doctorId));
+                                    printReferralSlip({
+                                      patientName: patient.name,
+                                      mrn: patient.mrn,
+                                      age: patient.age,
+                                      gender: patient.gender,
+                                      phone: patient.phone,
+                                      address: patient.address,
+                                      guardianName: patient.guardianName || patient.fatherName,
+                                      isReferral: true,
+                                      referredBy: patient.referredBy || patient.referred_by || 'Medical Practitioner',
+                                      referralHospital: patient.referralHospital || patient.referral_hospital,
+                                      referralReferenceNo: patient.referralReferenceNo || patient.referral_reference_no || `REF-${patient.mrn?.replace('MRN-', '') || '101'}`,
+                                      referralContact: patient.referralContact || patient.referral_contact,
+                                      referralReason: patient.referralReason || patient.referral_reason || activeAdm?.reason || 'Inpatient Care',
+                                      referralType: patient.referralType || patient.referral_type || 'Doctor',
+                                      referralDate: patient.referralDate || patient.referral_date || new Date().toISOString().substring(0, 10),
+                                      ward: bed.ward || 'General Ward',
+                                      bedNumber: bed.bed_number || bed.number,
+                                      attendingDoctor: activeDoc?.name || 'Dr. A. K. Sharma',
+                                      status: 'Admitted'
+                                    });
+                                  }}
+                                >
+                                  <ArrowUpRight className="w-3 h-3 text-teal-700 mr-0.5" />
+                                  Ref Slip
+                                </Button>
+                              )}
                             </>
                           )}
                         </div>
@@ -1809,16 +2251,17 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
                   <UserPlus className="w-4 h-4 text-teal-600" />
                   Quick Register New Inpatient
                 </CardTitle>
+                <CardDescription className="text-xs text-slate-500">Register new patient and optionally record reference details.</CardDescription>
               </CardHeader>
               <CardContent className="p-4 space-y-3 text-xs">
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
-                    <Label className="text-[10px]">Patient Name</Label>
-                    <Input value={quickPatient.name} onChange={(e) => setQuickPatient({...quickPatient, name: e.target.value})} className="h-8 text-xs" />
+                    <Label className="text-[10px]">Patient Name *</Label>
+                    <Input value={quickPatient.name} onChange={(e) => setQuickPatient({...quickPatient, name: e.target.value})} className="h-8 text-xs" placeholder="Full name" />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[10px]">Age</Label>
-                    <Input type="number" value={quickPatient.age} onChange={(e) => setQuickPatient({...quickPatient, age: e.target.value})} className="h-8 text-xs" />
+                    <Label className="text-[10px]">Age *</Label>
+                    <Input type="number" value={quickPatient.age} onChange={(e) => setQuickPatient({...quickPatient, age: e.target.value})} className="h-8 text-xs" placeholder="e.g. 42" />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -1834,14 +2277,60 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
                     </Select>
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[10px]">Phone</Label>
-                    <Input value={quickPatient.phone} onChange={(e) => setQuickPatient({...quickPatient, phone: e.target.value})} className="h-8 text-xs" />
+                    <Label className="text-[10px]">Phone *</Label>
+                    <Input value={quickPatient.phone} onChange={(e) => setQuickPatient({...quickPatient, phone: e.target.value})} className="h-8 text-xs" placeholder="10-digit mobile" />
                   </div>
                 </div>
                 <div className="space-y-1">
                   <Label className="text-[10px]">Address</Label>
-                  <Input value={quickPatient.address} onChange={(e) => setQuickPatient({...quickPatient, address: e.target.value})} className="h-8 text-xs" />
+                  <Input value={quickPatient.address} onChange={(e) => setQuickPatient({...quickPatient, address: e.target.value})} className="h-8 text-xs" placeholder="Locality / City" />
                 </div>
+
+                {/* Referral toggle in quick register */}
+                <div className="border-t pt-2 space-y-2">
+                  <div className="flex items-center space-x-2 bg-teal-50/70 p-2 rounded-lg border border-teal-200/80">
+                    <input 
+                      type="checkbox" 
+                      id="quick-is-referral"
+                      className="h-3.5 w-3.5 rounded text-teal-600 focus:ring-teal-500 cursor-pointer"
+                      checked={quickPatient.isReferral}
+                      onChange={(e) => setQuickPatient({...quickPatient, isReferral: e.target.checked})}
+                    />
+                    <label htmlFor="quick-is-referral" className="text-xs font-bold text-teal-950 cursor-pointer select-none">
+                      Referred Case (Doctor / Hospital)
+                    </label>
+                  </div>
+
+                  {quickPatient.isReferral && (
+                    <div className="space-y-2 bg-teal-50/40 p-2.5 rounded-lg border border-teal-100 text-xs animate-in fade-in duration-150">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-[10px]">Referring Doctor</Label>
+                          <Input value={quickPatient.referredBy} onChange={(e) => setQuickPatient({...quickPatient, referredBy: e.target.value})} placeholder="Dr. Name" className="h-7 text-xs bg-white" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px]">Hospital / Clinic</Label>
+                          <Input value={quickPatient.referralHospital} onChange={(e) => setQuickPatient({...quickPatient, referralHospital: e.target.value})} placeholder="Clinic name" className="h-7 text-xs bg-white" />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-[10px]">Ref / Slip No.</Label>
+                          <Input value={quickPatient.referralReferenceNo} onChange={(e) => setQuickPatient({...quickPatient, referralReferenceNo: e.target.value})} placeholder="e.g. REF-101" className="h-7 text-xs font-mono bg-white" />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px]">Doctor Phone</Label>
+                          <Input value={quickPatient.referralContact} onChange={(e) => setQuickPatient({...quickPatient, referralContact: e.target.value})} placeholder="Contact no." className="h-7 text-xs bg-white" />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[10px]">Referral Reason / Diagnosis</Label>
+                        <Input value={quickPatient.referralReason} onChange={(e) => setQuickPatient({...quickPatient, referralReason: e.target.value})} placeholder="Clinical indication" className="h-7 text-xs bg-white" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <Button className="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold h-8 text-xs" onClick={handleQuickRegister}>
                   Create & Select Patient
                 </Button>
@@ -1856,22 +2345,43 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
                   <Building className="w-4 h-4 text-white" />
                   Allocate Bed & Check-In
                 </CardTitle>
+                <CardDescription className="text-teal-100 text-xs">Assign bed, attending physician, and process referral reference details.</CardDescription>
               </CardHeader>
               <CardContent className="p-5 space-y-4 text-xs">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <Label>Patient Selection</Label>
-                    <Select value={admissionForm.patientId} onValueChange={(v) => setAdmissionForm({...admissionForm, patientId: v})}>
+                    <Label className="font-semibold text-slate-700">Patient Selection *</Label>
+                    <Select 
+                      value={admissionForm.patientId} 
+                      onValueChange={(v) => {
+                        const selectedPat = patients.find(p => String(p.id) === String(v));
+                        setAdmissionForm(prev => ({
+                          ...prev,
+                          patientId: v,
+                          isReferral: selectedPat ? Boolean(selectedPat.isReferral || selectedPat.is_referral) : prev.isReferral,
+                          referredBy: selectedPat ? (selectedPat.referredBy || selectedPat.referred_by || '') : prev.referredBy,
+                          referralHospital: selectedPat ? (selectedPat.referralHospital || selectedPat.referral_hospital || '') : prev.referralHospital,
+                          referralReferenceNo: selectedPat ? (selectedPat.referralReferenceNo || selectedPat.referral_reference_no || '') : prev.referralReferenceNo,
+                          referralContact: selectedPat ? (selectedPat.referralContact || selectedPat.referral_contact || '') : prev.referralContact,
+                          referralReason: selectedPat ? (selectedPat.referralReason || selectedPat.referral_reason || '') : prev.referralReason,
+                          referralType: selectedPat ? (selectedPat.referralType || selectedPat.referral_type || 'Doctor') : prev.referralType,
+                          referralDate: selectedPat?.referralDate || selectedPat?.referral_date || prev.referralDate || new Date().toISOString().substring(0, 10),
+                          referralNotes: selectedPat?.referralNotes || selectedPat?.referral_notes || prev.referralNotes || ''
+                        }));
+                      }}
+                    >
                       <SelectTrigger className="h-9 text-xs bg-white"><SelectValue placeholder="Select patient" /></SelectTrigger>
                       <SelectContent>
                         {patients.map(p => (
-                          <SelectItem key={p.id} value={p.id}>{p.name} ({p.mrn})</SelectItem>
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name} ({p.mrn}) {Boolean(p.isReferral || p.is_referral) ? '• [Referred]' : ''}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-1">
-                    <Label>Attending Doctor</Label>
+                    <Label className="font-semibold text-slate-700">Attending Consultant / Doctor *</Label>
                     <Select value={admissionForm.doctorId} onValueChange={(v) => setAdmissionForm({...admissionForm, doctorId: v})}>
                       <SelectTrigger className="h-9 text-xs bg-white"><SelectValue placeholder="Select doctor" /></SelectTrigger>
                       <SelectContent>
@@ -1885,7 +2395,7 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <Label>Ward</Label>
+                    <Label className="font-semibold text-slate-700">Ward *</Label>
                     <Select value={admissionForm.ward} onValueChange={(v) => setAdmissionForm({...admissionForm, ward: v, bedId: ''})}>
                       <SelectTrigger className="h-9 text-xs bg-white"><SelectValue placeholder="Select ward" /></SelectTrigger>
                       <SelectContent>
@@ -1896,7 +2406,7 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
                     </Select>
                   </div>
                   <div className="space-y-1">
-                    <Label>Allocate Bed</Label>
+                    <Label className="font-semibold text-slate-700">Allocate Bed *</Label>
                     <Select value={admissionForm.bedId} onValueChange={(v) => setAdmissionForm({...admissionForm, bedId: v})}>
                       <SelectTrigger className="h-9 text-xs bg-white"><SelectValue placeholder="Select bed" /></SelectTrigger>
                       <SelectContent>
@@ -1908,8 +2418,129 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
                   </div>
                 </div>
 
+                {/* Comprehensive Referral & Reference Details Section */}
+                <div className="bg-teal-50/70 border border-teal-200 rounded-xl p-3.5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <ArrowUpRight className="w-4 h-4 text-teal-700" />
+                      <span className="font-bold text-teal-950 text-xs uppercase tracking-wider">Referral & Reference Details</span>
+                    </div>
+                    <div className="flex items-center gap-2 bg-white px-2.5 py-1 rounded-lg border border-teal-200 shadow-2xs">
+                      <input 
+                        type="checkbox" 
+                        id="checkin-is-referral"
+                        className="h-3.5 w-3.5 rounded text-teal-600 focus:ring-teal-500 cursor-pointer"
+                        checked={admissionForm.isReferral}
+                        onChange={(e) => setAdmissionForm({...admissionForm, isReferral: e.target.checked})}
+                      />
+                      <label htmlFor="checkin-is-referral" className="text-xs font-bold text-teal-900 cursor-pointer select-none">
+                        Referred Admission Case
+                      </label>
+                    </div>
+                  </div>
+
+                  {admissionForm.isReferral ? (
+                    <div className="space-y-3 animate-in fade-in duration-200">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div className="space-y-1">
+                          <Label className="text-[11px] font-bold text-slate-700">Referral Type</Label>
+                          <Select 
+                            value={admissionForm.referralType || 'Doctor'} 
+                            onValueChange={(v) => setAdmissionForm({...admissionForm, referralType: v})}
+                          >
+                            <SelectTrigger className="h-8 text-xs bg-white"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Doctor">Doctor / Consultant</SelectItem>
+                              <SelectItem value="Clinic">Clinic / PolyClinic</SelectItem>
+                              <SelectItem value="Hospital">Hospital / Nursing Home</SelectItem>
+                              <SelectItem value="Diagnostic">Diagnostic Centre</SelectItem>
+                              <SelectItem value="Emergency">Emergency / Ambulance</SelectItem>
+                              <SelectItem value="Other">Other Reference</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label className="text-[11px] font-bold text-slate-700">Referred By (Doctor / Specialist)</Label>
+                          <Input 
+                            value={admissionForm.referredBy} 
+                            onChange={(e) => setAdmissionForm({...admissionForm, referredBy: e.target.value})}
+                            placeholder="e.g. Dr. Rajesh Verma (MD)"
+                            className="h-8 text-xs bg-white"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label className="text-[11px] font-bold text-slate-700">Reference / Slip / Letter No.</Label>
+                          <Input 
+                            value={admissionForm.referralReferenceNo} 
+                            onChange={(e) => setAdmissionForm({...admissionForm, referralReferenceNo: e.target.value})}
+                            placeholder="e.g. REF-2026-804"
+                            className="h-8 text-xs font-mono bg-white"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div className="space-y-1">
+                          <Label className="text-[11px] font-bold text-slate-700">Referring Hospital / Clinic</Label>
+                          <Input 
+                            value={admissionForm.referralHospital} 
+                            onChange={(e) => setAdmissionForm({...admissionForm, referralHospital: e.target.value})}
+                            placeholder="e.g. Apex Multispecialty Clinic"
+                            className="h-8 text-xs bg-white"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label className="text-[11px] font-bold text-slate-700">Doctor / Center Contact No.</Label>
+                          <Input 
+                            value={admissionForm.referralContact} 
+                            onChange={(e) => setAdmissionForm({...admissionForm, referralContact: e.target.value})}
+                            placeholder="e.g. 9876543210"
+                            className="h-8 text-xs bg-white"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <Label className="text-[11px] font-bold text-slate-700">Referral Date</Label>
+                          <Input 
+                            type="date"
+                            value={admissionForm.referralDate} 
+                            onChange={(e) => setAdmissionForm({...admissionForm, referralDate: e.target.value})}
+                            className="h-8 text-xs bg-white"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-bold text-slate-700">Referral Indication / Clinical Reason</Label>
+                        <Input 
+                          value={admissionForm.referralReason} 
+                          onChange={(e) => setAdmissionForm({...admissionForm, referralReason: e.target.value})}
+                          placeholder="e.g. Severe abdominal pain with suspected choledocholithiasis for admission & management"
+                          className="h-8 text-xs bg-white"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-[11px] text-teal-800/80 italic flex items-center justify-between">
+                      <span>Patient recorded as direct walk-in admission.</span>
+                      <Button 
+                        type="button" 
+                        variant="outline" 
+                        size="sm" 
+                        className="h-6 text-[10px] text-teal-700 border-teal-300 bg-white hover:bg-teal-50"
+                        onClick={() => setAdmissionForm({...admissionForm, isReferral: true})}
+                      >
+                        + Add Referral Reference
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
                 <Button 
-                  className="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold h-10 text-xs mt-2"
+                  className="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold h-10 text-xs mt-2 shadow-sm"
                   onClick={async () => {
                     const payload = {
                       patient_id: admissionForm.patientId,
@@ -1917,7 +2548,8 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
                       doctor_id: admissionForm.doctorId,
                       ward: admissionForm.ward,
                       urgency: admissionForm.urgency,
-                      status: 'Admitted'
+                      status: 'Admitted',
+                      reason: admissionForm.referralReason || 'Inpatient Admission & Care'
                     };
                     const validation = validateAdmissionFields(payload, beds, patients);
                     if (!validation.isValid) {
@@ -1927,8 +2559,67 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
                     const synced = await supabaseService.createAdmission(payload);
                     if (synced) {
                       await supabaseService.updateBedStatus(admissionForm.bedId, 'Occupied', admissionForm.patientId);
-                      await supabaseService.updatePatient(admissionForm.patientId, { status: 'Admitted', needs_admission: false });
-                      toast.success('Patient checked in and bed allocated!');
+                      
+                      const selectedPat = patients.find(p => String(p.id) === String(admissionForm.patientId));
+                      const autoRefNo = admissionForm.referralReferenceNo || (admissionForm.isReferral ? `REF-${selectedPat?.mrn?.replace('MRN-', '') || Math.floor(1000 + Math.random() * 9000)}` : null);
+                      
+                      await supabaseService.updatePatient(admissionForm.patientId, { 
+                        status: 'Admitted', 
+                        needs_admission: false,
+                        is_referral: admissionForm.isReferral,
+                        isReferral: admissionForm.isReferral,
+                        referred_by: admissionForm.isReferral ? (admissionForm.referredBy || 'Medical Practitioner') : null,
+                        referredBy: admissionForm.isReferral ? (admissionForm.referredBy || 'Medical Practitioner') : null,
+                        referral_hospital: admissionForm.isReferral ? admissionForm.referralHospital : null,
+                        referralHospital: admissionForm.isReferral ? admissionForm.referralHospital : null,
+                        referral_reference_no: autoRefNo,
+                        referralReferenceNo: autoRefNo,
+                        referral_contact: admissionForm.isReferral ? admissionForm.referralContact : null,
+                        referralContact: admissionForm.isReferral ? admissionForm.referralContact : null,
+                        referral_reason: admissionForm.isReferral ? admissionForm.referralReason : null,
+                        referralReason: admissionForm.isReferral ? admissionForm.referralReason : null,
+                        referral_type: admissionForm.isReferral ? admissionForm.referralType : null,
+                        referralType: admissionForm.isReferral ? admissionForm.referralType : null,
+                        referral_date: admissionForm.isReferral ? admissionForm.referralDate : null,
+                        referralDate: admissionForm.isReferral ? admissionForm.referralDate : null
+                      });
+
+                      toast.success('Patient checked in and bed allocated successfully!');
+
+                      if (admissionForm.isReferral) {
+                        const currentBed = beds.find(b => String(b.id) === String(admissionForm.bedId));
+                        const currentDoc = doctorsList.find(d => String(d.id) === String(admissionForm.doctorId));
+                        
+                        toast.info('Referred patient admitted. You can now generate the Referral Slip.', {
+                          action: {
+                            label: 'Print Ref Slip',
+                            onClick: () => {
+                              printReferralSlip({
+                                patientName: selectedPat?.name || 'Inpatient',
+                                mrn: selectedPat?.mrn || 'IPD-ACTIVE',
+                                age: selectedPat?.age,
+                                gender: selectedPat?.gender,
+                                phone: selectedPat?.phone,
+                                address: selectedPat?.address,
+                                guardianName: selectedPat?.guardianName || selectedPat?.fatherName,
+                                isReferral: true,
+                                referredBy: admissionForm.referredBy || 'Medical Practitioner',
+                                referralHospital: admissionForm.referralHospital,
+                                referralReferenceNo: autoRefNo || 'REF-101',
+                                referralContact: admissionForm.referralContact,
+                                referralReason: admissionForm.referralReason,
+                                referralType: admissionForm.referralType,
+                                referralDate: admissionForm.referralDate,
+                                ward: admissionForm.ward,
+                                bedNumber: currentBed?.bed_number || currentBed?.number || '',
+                                attendingDoctor: currentDoc?.name || 'Dr. A. K. Sharma',
+                                status: 'Admitted'
+                              });
+                            }
+                          }
+                        });
+                      }
+
                       fetchData();
                     }
                   }}
@@ -1940,6 +2631,394 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
           </div>
         </div>
       )}
+
+      {/* Tab: Referral Cases & Processing Center */}
+      {activeTab === 'referrals' && (() => {
+        // Build the combined list of referral patients/admissions
+        const referralList = patients.filter(p => {
+          const isRef = p.isReferral || p.is_referral || p.referredBy || p.referred_by || p.referralReferenceNo || p.referral_reference_no;
+          if (!isRef) return false;
+
+          // Search term filter
+          if (referralSearchTerm) {
+            const term = referralSearchTerm.toLowerCase();
+            const matchesName = (p.name || '').toLowerCase().includes(term);
+            const matchesMrn = (p.mrn || '').toLowerCase().includes(term);
+            const matchesRef = (p.referredBy || p.referred_by || '').toLowerCase().includes(term);
+            const matchesHosp = (p.referralHospital || p.referral_hospital || '').toLowerCase().includes(term);
+            const matchesRefNo = (p.referralReferenceNo || p.referral_reference_no || '').toLowerCase().includes(term);
+            if (!matchesName && !matchesMrn && !matchesRef && !matchesHosp && !matchesRefNo) {
+              return false;
+            }
+          }
+
+          // Status filter
+          if (referralStatusFilter === 'admitted') {
+            const isAdmitted = p.status === 'Admitted' || admissions.some(a => String(a.patient_id || a.patientId) === String(p.id) && a.status === 'Admitted');
+            if (!isAdmitted) return false;
+          } else if (referralStatusFilter === 'discharged') {
+            const isDischarged = p.status === 'Discharged' || p.status === 'discharged';
+            if (!isDischarged) return false;
+          } else if (referralStatusFilter === 'opd') {
+            const isOpd = p.registration_type === 'OPD' || p.registrationType === 'OPD' || p.department === 'OPD';
+            if (!isOpd) return false;
+          }
+
+          // Referral type filter
+          if (referralTypeFilter !== 'all') {
+            const rType = p.referralType || p.referral_type || 'Doctor';
+            if (rType.toLowerCase() !== referralTypeFilter.toLowerCase()) return false;
+          }
+
+          return true;
+        });
+
+        // Compute summary metrics
+        const totalReferrals = patients.filter(p => p.isReferral || p.is_referral || p.referredBy || p.referred_by).length;
+        const admittedReferrals = patients.filter(p => (p.isReferral || p.is_referral || p.referredBy || p.referred_by) && (p.status === 'Admitted' || admissions.some(a => String(a.patient_id || a.patientId) === String(p.id) && a.status === 'Admitted'))).length;
+        const uniqueReferringSources = new Set(patients.map(p => p.referredBy || p.referred_by).filter(Boolean)).size;
+
+        return (
+          <div className="space-y-5 animate-in fade-in duration-200">
+            {/* KPI Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <Card className="border border-teal-200/80 bg-gradient-to-br from-teal-50/80 to-white shadow-xs">
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] font-bold text-teal-800 uppercase tracking-wider">Total Referred Cases</p>
+                    <p className="text-2xl font-black text-teal-950 mt-1">{totalReferrals}</p>
+                    <p className="text-[10px] text-teal-700 mt-0.5">Recorded across IPD & OPD</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-teal-100 flex items-center justify-center text-teal-700">
+                    <ArrowUpRight className="w-5 h-5" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border border-blue-200/80 bg-gradient-to-br from-blue-50/80 to-white shadow-xs">
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] font-bold text-blue-800 uppercase tracking-wider">Admitted Inpatients</p>
+                    <p className="text-2xl font-black text-blue-950 mt-1">{admittedReferrals}</p>
+                    <p className="text-[10px] text-blue-700 mt-0.5">Currently occupying IPD beds</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-700">
+                    <Building2 className="w-5 h-5" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border border-purple-200/80 bg-gradient-to-br from-purple-50/80 to-white shadow-xs">
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] font-bold text-purple-800 uppercase tracking-wider">Referring Doctors / Centers</p>
+                    <p className="text-2xl font-black text-purple-950 mt-1">{uniqueReferringSources}</p>
+                    <p className="text-[10px] text-purple-700 mt-0.5">Active referral network</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-purple-700">
+                    <Stethoscope className="w-5 h-5" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border border-slate-200 bg-gradient-to-br from-slate-50 to-white shadow-xs">
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Filtered View Count</p>
+                    <p className="text-2xl font-black text-slate-900 mt-1">{referralList.length}</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Matches active filters</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
+                    <FileCheck className="w-5 h-5" />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Action Bar & Filter Controls */}
+            <Card className="border border-slate-200 shadow-xs bg-white">
+              <CardContent className="p-4">
+                <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                  <div className="flex flex-1 flex-wrap items-center gap-2">
+                    <div className="relative flex-1 min-w-[220px]">
+                      <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                      <Input 
+                        placeholder="Search patient, MRN, Dr. Name, Hospital, Ref #..."
+                        value={referralSearchTerm}
+                        onChange={(e) => setReferralSearchTerm(e.target.value)}
+                        className="pl-9 h-9 text-xs"
+                      />
+                      {referralSearchTerm && (
+                        <button 
+                          onClick={() => setReferralSearchTerm('')}
+                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+
+                    <Select value={referralStatusFilter} onValueChange={(v: any) => setReferralStatusFilter(v)}>
+                      <SelectTrigger className="h-9 text-xs w-[140px] bg-white"><SelectValue placeholder="Status" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Statuses</SelectItem>
+                        <SelectItem value="admitted">Admitted Inpatients</SelectItem>
+                        <SelectItem value="discharged">Discharged</SelectItem>
+                        <SelectItem value="opd">OPD Consultations</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Select value={referralTypeFilter} onValueChange={(v) => setReferralTypeFilter(v)}>
+                      <SelectTrigger className="h-9 text-xs w-[130px] bg-white"><SelectValue placeholder="Category" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Categories</SelectItem>
+                        <SelectItem value="doctor">Doctor</SelectItem>
+                        <SelectItem value="clinic">Clinic</SelectItem>
+                        <SelectItem value="hospital">Hospital</SelectItem>
+                        <SelectItem value="diagnostic">Diagnostic</SelectItem>
+                        <SelectItem value="emergency">Emergency</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button 
+                      variant="outline"
+                      className="border-teal-300 text-teal-800 bg-teal-50 hover:bg-teal-100 font-bold gap-1.5 text-xs h-9"
+                      onClick={() => {
+                        const registerItems: ReferralCasePrintData[] = referralList.map(p => {
+                          const patientAdm = admissions.find(a => String(a.patient_id || a.patientId) === String(p.id));
+                          const patientBed = beds.find(b => String(b.id) === String(patientAdm?.bed_id || patientAdm?.bedId));
+                          const patientDoc = doctorsList.find(d => String(d.id) === String(patientAdm?.doctor_id || patientAdm?.doctorId));
+                          return {
+                            patientName: p.name,
+                            mrn: p.mrn,
+                            age: p.age,
+                            gender: p.gender,
+                            phone: p.phone,
+                            address: p.address,
+                            guardianName: p.guardianName || p.fatherName,
+                            isReferral: true,
+                            referredBy: p.referredBy || p.referred_by || 'Medical Practitioner',
+                            referralHospital: p.referralHospital || p.referral_hospital || 'External Center',
+                            referralReferenceNo: p.referralReferenceNo || p.referral_reference_no || `REF-${p.mrn?.replace('MRN-', '') || '101'}`,
+                            referralContact: p.referralContact || p.referral_contact,
+                            referralReason: p.referralReason || p.referral_reason || patientAdm?.reason || 'Clinical Care & Management',
+                            referralType: p.referralType || p.referral_type || 'Doctor',
+                            referralDate: p.referralDate || p.referral_date || (patientAdm?.admission_date ? patientAdm.admission_date.substring(0, 10) : new Date().toISOString().substring(0, 10)),
+                            ward: patientAdm?.ward || (p.status === 'Admitted' ? 'IPD Ward' : 'OPD'),
+                            bedNumber: patientBed?.bed_number || patientBed?.number || '',
+                            attendingDoctor: patientDoc?.name || 'Dr. A. K. Sharma',
+                            status: p.status || 'Active'
+                          };
+                        });
+                        printReferralRegister(registerItems, 'Master Inpatient & Outpatient Referral Register');
+                      }}
+                    >
+                      <Printer className="w-3.5 h-3.5 text-teal-700" />
+                      Print Referral Register
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Referrals Table */}
+            <Card className="border border-slate-200 shadow-xs bg-white overflow-hidden">
+              <div className="overflow-x-auto">
+                <Table className="text-xs">
+                  <TableHeader className="bg-slate-50 border-b">
+                    <TableRow>
+                      <TableHead className="font-bold text-slate-700">Ref. No. & Date</TableHead>
+                      <TableHead className="font-bold text-slate-700">Patient Details</TableHead>
+                      <TableHead className="font-bold text-slate-700">Referring Doctor / Center</TableHead>
+                      <TableHead className="font-bold text-slate-700">Admission / Ward</TableHead>
+                      <TableHead className="font-bold text-slate-700">Clinical Indication / Reason</TableHead>
+                      <TableHead className="font-bold text-slate-700">Status</TableHead>
+                      <TableHead className="font-bold text-slate-700 text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {referralList.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="h-32 text-center text-slate-400">
+                          <ArrowUpRight className="w-8 h-8 mx-auto mb-2 opacity-30 text-teal-600" />
+                          <p className="font-bold text-slate-600">No referral records found matching your filters.</p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">Use the Inpatient Registration or OPD to record new referral cases.</p>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      referralList.map((patient) => {
+                        const patientAdm = admissions.find(a => String(a.patient_id || a.patientId) === String(patient.id));
+                        const patientBed = beds.find(b => String(b.id) === String(patientAdm?.bed_id || patientAdm?.bedId));
+                        const patientDoc = doctorsList.find(d => String(d.id) === String(patientAdm?.doctor_id || patientAdm?.doctorId));
+                        const isAdmitted = patient.status === 'Admitted' || Boolean(patientAdm && patientAdm.status === 'Admitted');
+                        const refNo = patient.referralReferenceNo || patient.referral_reference_no || `REF-${patient.mrn?.replace('MRN-', '') || '101'}`;
+                        const refDate = patient.referralDate || patient.referral_date || (patientAdm?.admission_date ? patientAdm.admission_date.substring(0, 10) : '—');
+                        const refDoc = patient.referredBy || patient.referred_by || 'Medical Practitioner';
+                        const refHosp = patient.referralHospital || patient.referral_hospital || '—';
+                        const refPhone = patient.referralContact || patient.referral_contact;
+                        const refReason = patient.referralReason || patient.referral_reason || patientAdm?.reason || 'Inpatient Admission & Care';
+
+                        return (
+                          <TableRow key={patient.id} className="hover:bg-teal-50/30 transition-colors">
+                            <TableCell className="font-mono">
+                              <span className="inline-flex items-center gap-1 font-bold text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+                                <ArrowUpRight className="w-3 h-3 text-teal-600" />
+                                {refNo}
+                              </span>
+                              <div className="text-[10px] text-slate-500 mt-1">{refDate}</div>
+                              <span className="text-[9px] font-semibold text-slate-400 uppercase">{patient.referralType || patient.referral_type || 'Doctor'}</span>
+                            </TableCell>
+
+                            <TableCell>
+                              <div className="font-bold text-slate-900 text-sm">{patient.name}</div>
+                              <div className="text-[11px] text-slate-500 font-mono">{patient.mrn} • {patient.age}y / {patient.gender}</div>
+                              {patient.phone && (
+                                <div className="text-[10px] text-slate-400 mt-0.5">📞 {patient.phone}</div>
+                              )}
+                            </TableCell>
+
+                            <TableCell>
+                              <div className="font-bold text-slate-800 flex items-center gap-1">
+                                <Stethoscope className="w-3.5 h-3.5 text-teal-600" />
+                                {refDoc}
+                              </div>
+                              {refHosp !== '—' && (
+                                <div className="text-[11px] text-slate-600 font-medium">{refHosp}</div>
+                              )}
+                              {refPhone && (
+                                <div className="text-[10px] text-slate-400 mt-0.5">📱 {refPhone}</div>
+                              )}
+                            </TableCell>
+
+                            <TableCell>
+                              {isAdmitted ? (
+                                <div className="space-y-0.5">
+                                  <span className="font-bold text-teal-900 bg-teal-100/80 px-2 py-0.5 rounded text-[11px] border border-teal-300 inline-block">
+                                    Bed {patientBed?.bed_number || patientBed?.number || '—'} ({patientAdm?.ward || 'General'})
+                                  </span>
+                                  <div className="text-[10px] text-slate-500">Dr. {patientDoc?.name || 'Assigned Consultant'}</div>
+                                </div>
+                              ) : (
+                                <div className="text-slate-500 text-[11px]">
+                                  {patient.registration_type === 'OPD' ? 'OPD Consultation' : 'Discharged / Outpatient'}
+                                </div>
+                              )}
+                            </TableCell>
+
+                            <TableCell className="max-w-[220px]">
+                              <p className="text-[11px] text-slate-700 line-clamp-2 leading-relaxed" title={refReason}>
+                                {refReason}
+                              </p>
+                            </TableCell>
+
+                            <TableCell>
+                              {isAdmitted ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  Admitted
+                                </span>
+                              ) : (patient.status === 'Discharged' || patient.status === 'discharged') ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                                  Discharged
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                                  OPD Active
+                                </span>
+                              )}
+                            </TableCell>
+
+                            <TableCell className="text-right space-x-1">
+                              {/* Print Referral Slip */}
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="h-7 px-2 text-[11px] font-bold text-teal-700 border-teal-300 bg-teal-50 hover:bg-teal-100"
+                                title="Print Doctor Referral Acknowledgment Slip"
+                                onClick={() => {
+                                  printReferralSlip({
+                                    patientName: patient.name,
+                                    mrn: patient.mrn,
+                                    age: patient.age,
+                                    gender: patient.gender,
+                                    phone: patient.phone,
+                                    address: patient.address,
+                                    guardianName: patient.guardianName || patient.fatherName,
+                                    isReferral: true,
+                                    referredBy: refDoc,
+                                    referralHospital: refHosp !== '—' ? refHosp : undefined,
+                                    referralReferenceNo: refNo,
+                                    referralContact: refPhone,
+                                    referralReason: refReason,
+                                    referralType: patient.referralType || patient.referral_type || 'Doctor',
+                                    referralDate: refDate,
+                                    ward: patientAdm?.ward || (isAdmitted ? 'IPD Ward' : undefined),
+                                    bedNumber: patientBed?.bed_number || patientBed?.number,
+                                    attendingDoctor: patientDoc?.name || 'Dr. A. K. Sharma',
+                                    status: isAdmitted ? 'Admitted' : patient.status || 'Active'
+                                  });
+                                }}
+                              >
+                                <Printer className="w-3 h-3 mr-1 text-teal-600" />
+                                Slip
+                              </Button>
+
+                              {/* Official Admission Sheet */}
+                              {isAdmitted && (
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="h-7 px-2 text-[11px] font-bold text-blue-700 border-blue-300 bg-blue-50 hover:bg-blue-100"
+                                  title="View/Print Official Statutory Admission Sheet"
+                                  onClick={() => {
+                                    setAdmissionSheetPatient(patient);
+                                    setAdmissionSheetAdmission(patientAdm);
+                                    setIsAdmissionSheetOpen(true);
+                                  }}
+                                >
+                                  <FileText className="w-3 h-3 mr-1 text-blue-600" />
+                                  Sheet
+                                </Button>
+                              )}
+
+                              {/* Edit Reference Details */}
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="h-7 px-2 text-[11px] font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                                title="Edit Referral & Reference Information"
+                                onClick={() => {
+                                  setEditingReferralPatient(patient);
+                                  setEditingReferralForm({
+                                    isReferral: true,
+                                    referredBy: refDoc !== 'Medical Practitioner' ? refDoc : '',
+                                    referralHospital: refHosp !== '—' ? refHosp : '',
+                                    referralReferenceNo: refNo,
+                                    referralContact: refPhone || '',
+                                    referralReason: refReason,
+                                    referralType: patient.referralType || patient.referral_type || 'Doctor',
+                                    referralDate: refDate !== '—' ? refDate : new Date().toISOString().substring(0, 10),
+                                    referralNotes: patient.referralNotes || patient.referral_notes || ''
+                                  });
+                                  setIsEditReferralOpen(true);
+                                }}
+                              >
+                                <Edit className="w-3 h-3 text-slate-500" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </Card>
+          </div>
+        );
+      })()}
 
       {/* Tab: Surgery */}
       {activeTab === 'surgery' && (
@@ -2033,97 +3112,487 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
       {/* Tab: Discharge */}
       {activeTab === 'discharge' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Left Column: Prepare Discharge Summary */}
           <div className="lg:col-span-5 space-y-4">
-            <Card className="border border-slate-200 shadow-xs bg-white">
-              <CardHeader className="p-4 bg-slate-50 border-b">
-                <CardTitle className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                  <Receipt className="w-4 h-4 text-emerald-600" />
-                  Prepare Discharge Summary
-                </CardTitle>
+            <Card className="border border-slate-200 shadow-sm bg-white">
+              <CardHeader className="p-4 bg-gradient-to-r from-teal-900 to-emerald-900 text-white rounded-t-lg">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-bold text-white flex items-center gap-2">
+                    <Receipt className="w-4 h-4 text-teal-300" />
+                    Prepare Discharge Summary
+                  </CardTitle>
+                  <Badge variant="outline" className="border-teal-400/40 text-teal-200 bg-teal-950/40 text-[10px]">
+                    NABH Format
+                  </Badge>
+                </div>
+                <CardDescription className="text-xs text-teal-200/90 mt-0.5">
+                  Select an active inpatient to generate clinical discharge summary & take-home prescriptions.
+                </CardDescription>
               </CardHeader>
-              <CardContent className="p-4 space-y-3 text-xs">
-                <div className="space-y-1">
-                  <Label>Select Inpatient</Label>
+              <CardContent className="p-4 space-y-3.5 text-xs">
+                {/* Patient Selector */}
+                <div className="space-y-1.5 bg-teal-50/50 p-2.5 rounded-lg border border-teal-100">
+                  <div className="flex items-center justify-between">
+                    <Label className="font-bold text-teal-950 text-xs flex items-center gap-1">
+                      <User className="w-3.5 h-3.5 text-teal-700" />
+                      Select Inpatient Under Discharge *
+                    </Label>
+                    <span className="text-[10px] text-teal-700 font-semibold">
+                      {activeInpatientsForDischarge.length} Active Inpatients
+                    </span>
+                  </div>
                   <Select value={dischargeForm.patientId} onValueChange={(v) => handleSelectPatientForDischarge(v)}>
-                    <SelectTrigger className="h-8 text-xs bg-white"><SelectValue placeholder="Choose patient" /></SelectTrigger>
-                    <SelectContent>
-                      {admissions.filter(a => a.status === 'Admitted').map(adm => {
-                        const p = patients.find(pat => String(pat.id) === String(adm.patient_id) || String(pat.id) === String(adm.patientId));
-                        if (!p) return null;
-                        return <SelectItem key={p.id} value={p.id}>{p.name} ({p.mrn}) - Bed: {adm.ward}/{adm.bed_id}</SelectItem>;
-                      })}
+                    <SelectTrigger className="h-9 text-xs bg-white border-teal-200 shadow-xs">
+                      <SelectValue placeholder="Choose an active inpatient..." />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-72">
+                      {activeInpatientsForDischarge.map(item => (
+                        <SelectItem key={item.patientId} value={item.patientId}>
+                          <span className="font-bold text-slate-900">{item.patientName}</span> ({item.mrn}) — {item.ward} / {item.bedNumber} [{item.age}y/{item.gender}]
+                        </SelectItem>
+                      ))}
+                      {activeInpatientsForDischarge.length === 0 && (
+                        <div className="p-3 text-center text-slate-500 text-xs">
+                          No active admitted patients found.
+                        </div>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                {/* Discharge Type & Discharge Date */}
+                <div className="grid grid-cols-2 gap-2.5">
                   <div className="space-y-1">
-                    <Label>Discharge Type</Label>
+                    <Label className="font-semibold text-slate-700">Discharge Type</Label>
                     <Select value={dischargeForm.dischargeType} onValueChange={(v) => setDischargeForm({...dischargeForm, dischargeType: v})}>
                       <SelectTrigger className="h-8 text-xs bg-white"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="Routine / Improved">Routine / Improved</SelectItem>
-                        <SelectItem value="LAMA (Left Against Medical Advice)">LAMA</SelectItem>
-                        <SelectItem value="Deceased">Deceased</SelectItem>
+                        <SelectItem value="LAMA (Left Against Medical Advice)">LAMA (Against Advice)</SelectItem>
+                        <SelectItem value="Transfer to Higher Center">Transfer to Higher Center</SelectItem>
+                        <SelectItem value="Discharge on Request (DOR)">Discharge on Request (DOR)</SelectItem>
+                        <SelectItem value="Deceased">Deceased / Expired</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-1">
-                    <Label>Follow-Up Date</Label>
-                    <Input type="date" value={dischargeForm.followUpDate} onChange={(e) => setDischargeForm({...dischargeForm, followUpDate: e.target.value})} className="h-8 text-xs" />
+                    <Label className="font-semibold text-slate-700">Discharge Date</Label>
+                    <Input 
+                      type="date" 
+                      value={dischargeForm.dischargeDate} 
+                      onChange={(e) => setDischargeForm({...dischargeForm, dischargeDate: e.target.value})} 
+                      className="h-8 text-xs bg-white" 
+                    />
                   </div>
                 </div>
 
+                {/* Follow-up Date & Discharging Doctor */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="space-y-1">
+                    <Label className="font-semibold text-slate-700">Next Follow-Up Date</Label>
+                    <Input 
+                      type="date" 
+                      value={dischargeForm.followUpDate} 
+                      onChange={(e) => setDischargeForm({...dischargeForm, followUpDate: e.target.value})} 
+                      className="h-8 text-xs bg-white" 
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="font-semibold text-slate-700">Attending Consultant</Label>
+                    <Input 
+                      placeholder="Doctor in-charge" 
+                      value={dischargeForm.dischargeBy} 
+                      onChange={(e) => setDischargeForm({...dischargeForm, dischargeBy: e.target.value})} 
+                      className="h-8 text-xs bg-white" 
+                    />
+                  </div>
+                </div>
+
+                {/* Primary & Secondary Diagnosis */}
                 <div className="space-y-1">
-                  <Label>Clinical Treatment Course Summary</Label>
+                  <Label className="font-semibold text-slate-700">Primary Final Diagnosis *</Label>
+                  <Input 
+                    placeholder="e.g. Acute Calculus Cholecystitis / Enteric Fever / APD"
+                    value={dischargeForm.primaryDiagnosis}
+                    onChange={(e) => setDischargeForm({...dischargeForm, primaryDiagnosis: e.target.value})}
+                    className="h-8 text-xs bg-white"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="font-semibold text-slate-700">Operative Procedure (if surgical case)</Label>
+                  <Input 
+                    placeholder="e.g. Laparoscopic Cholecystectomy / Endoscopic Band Ligation"
+                    value={dischargeForm.operativeProcedure}
+                    onChange={(e) => setDischargeForm({...dischargeForm, operativeProcedure: e.target.value})}
+                    className="h-8 text-xs bg-white"
+                  />
+                </div>
+
+                {/* Clinical Summary */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <Label className="font-semibold text-slate-700">Hospital Course & Clinical Treatment Summary</Label>
+                    <span className="text-[10px] text-slate-400">Detailed treatment delivered</span>
+                  </div>
                   <textarea 
-                    className="w-full border rounded-lg p-2 text-xs min-h-[80px]"
+                    className="w-full border border-slate-300 rounded-lg p-2.5 text-xs min-h-[75px] bg-white focus:ring-1 focus:ring-teal-500 focus:outline-hidden"
+                    placeholder="Patient admitted with severe symptoms, investigated and started on IV antibiotics, analgesics, fluids, responded well..."
                     value={dischargeForm.clinicalSummary}
                     onChange={(e) => setDischargeForm({...dischargeForm, clinicalSummary: e.target.value})}
                   />
                 </div>
 
+                {/* Discharge Vitals & Condition */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="space-y-1">
+                    <Label className="font-semibold text-slate-700">Discharge Vitals</Label>
+                    <Input 
+                      placeholder="BP: 120/80 | PR: 76 | SpO2: 98%"
+                      value={dischargeForm.dischargeVitals}
+                      onChange={(e) => setDischargeForm({...dischargeForm, dischargeVitals: e.target.value})}
+                      className="h-8 text-xs bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="font-semibold text-slate-700">Condition at Discharge</Label>
+                    <Input 
+                      placeholder="Stable, Afebrile, Ambulatory"
+                      value={dischargeForm.conditionAtDischarge}
+                      onChange={(e) => setDischargeForm({...dischargeForm, conditionAtDischarge: e.target.value})}
+                      className="h-8 text-xs bg-white"
+                    />
+                  </div>
+                </div>
+
+                {/* Take-Home Medications */}
                 <div className="space-y-1">
-                  <Label>Take-Home Prescribed Medications</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="font-semibold text-slate-700 flex items-center gap-1">
+                      <Pill className="w-3.5 h-3.5 text-teal-600" />
+                      Take-Home Prescribed Medications (Dosage & Timing)
+                    </Label>
+                  </div>
                   <textarea 
-                    className="w-full border rounded-lg p-2 text-xs min-h-[70px] font-mono"
+                    className="w-full border border-slate-300 rounded-lg p-2.5 text-xs min-h-[75px] font-mono bg-white focus:ring-1 focus:ring-teal-500 focus:outline-hidden"
+                    placeholder="1. Tab. Pantoprazole 40mg (1-0-0) Before Breakfast x 10 days&#10;2. Tab. Amoxiclav 625mg (1-0-1) After Food x 5 days&#10;3. Tab. Paracetamol 650mg SOS for pain/fever"
                     value={dischargeForm.medications}
                     onChange={(e) => setDischargeForm({...dischargeForm, medications: e.target.value})}
                   />
                 </div>
 
-                <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold h-9 text-xs mt-2" onClick={handleDischargeWithSummary}>
-                  Save & Print Discharge Summary
-                </Button>
+                {/* Dietary Advice */}
+                <div className="space-y-1">
+                  <Label className="font-semibold text-slate-700">Dietary & Activity Advice</Label>
+                  <Input 
+                    value={dischargeForm.dietaryAdvice}
+                    onChange={(e) => setDischargeForm({...dischargeForm, dietaryAdvice: e.target.value})}
+                    className="h-8 text-xs bg-white"
+                  />
+                </div>
+
+                {/* Action Buttons */}
+                <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <Button 
+                    type="button"
+                    variant="outline"
+                    className="h-9 text-xs font-bold border-teal-600 text-teal-800 hover:bg-teal-50 gap-1.5"
+                    onClick={() => {
+                      if (!dischargeForm.patientId) {
+                        toast.error('Please select an inpatient first');
+                        return;
+                      }
+                      const selectedPat = patients.find(p => p.id === dischargeForm.patientId) || MOCK_PATIENTS.find(p => p.id === dischargeForm.patientId);
+                      const adm = admissions.find(a => (a.patient_id === dischargeForm.patientId || a.patientId === dischargeForm.patientId) && a.status === 'Admitted');
+                      const previewObj = {
+                        ...dischargeForm,
+                        patientName: selectedPat?.name || 'Inpatient',
+                        mrn: selectedPat?.mrn || 'MRN-IPD',
+                        age: selectedPat?.age,
+                        gender: selectedPat?.gender,
+                        phone: selectedPat?.phone,
+                        ward: adm?.ward || 'General Ward',
+                        bedNumber: adm?.bed_id || 'Bed-01',
+                        admissionDate: adm?.admission_date || selectedPat?.created_at,
+                        dischargeDate: dischargeForm.dischargeDate || new Date().toISOString()
+                      };
+                      setDischargedSummaryToShow(previewObj);
+                      setIsSummaryDetailsOpen(true);
+                    }}
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    Preview Summary
+                  </Button>
+
+                  <Button 
+                    type="button"
+                    className="h-9 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 shadow-sm"
+                    onClick={handleDischargeWithSummary}
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    Save & Print Summary
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </div>
 
-          <div className="lg:col-span-7">
-            <Card className="border border-slate-200 shadow-xs bg-white">
-              <CardHeader className="p-4 bg-slate-50 border-b">
-                <CardTitle className="text-sm font-bold text-slate-800">Discharge Registry</CardTitle>
-              </CardHeader>
-              <CardContent className="p-4 space-y-3">
-                {dischargeSummaries.map((summary) => (
-                  <div key={summary.id} className="p-3 border border-slate-100 rounded-xl bg-slate-50/50 flex justify-between items-center text-xs">
-                    <div>
-                      <p className="font-bold text-slate-900">{summary.patientName || 'Patient'}</p>
-                      <p className="text-[10px] text-slate-500">{summary.dischargeType} • {formatDate(summary.dischargeDate)}</p>
-                    </div>
+          {/* Right Column: Discharge Registry & All IPD Patients Under Discharge */}
+          <div className="lg:col-span-7 space-y-4">
+            <Card className="border border-slate-200 shadow-sm bg-white">
+              <CardHeader className="p-4 bg-slate-50 border-b border-slate-200 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <CardTitle className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <ClipboardList className="w-4 h-4 text-teal-600" />
+                      Discharge Registry & IPD Patients
+                    </CardTitle>
+                    <CardDescription className="text-xs text-slate-500 mt-0.5">
+                      All IPD patients under discharge, discharged records, LAMA, and clinical summaries.
+                    </CardDescription>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 font-bold text-[11px] px-2 py-0.5">
+                      {allDischargedPatientsList.length} Discharged
+                    </Badge>
+                    <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 font-bold text-[11px] px-2 py-0.5">
+                      {activeInpatientsForDischarge.length} Active IPD
+                    </Badge>
+                  </div>
+                </div>
+
+                {/* Filter Tabs & Search Bar */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <Button 
                       size="sm" 
-                      className="h-7 text-[10px] font-bold bg-teal-600 hover:bg-teal-700 text-white gap-1"
-                      onClick={() => {
-                        setDischargedSummaryToShow(summary);
-                        setIsSummaryDetailsOpen(true);
-                      }}
+                      variant={dischargeTabFilter === 'all' ? 'default' : 'outline'}
+                      className={`h-7 text-xs font-semibold px-2.5 ${dischargeTabFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-white text-slate-700'}`}
+                      onClick={() => setDischargeTabFilter('all')}
                     >
-                      <Printer className="w-3 h-3" />
-                      View & Print
+                      All Discharged ({allDischargedPatientsList.length})
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant={dischargeTabFilter === 'inpatients' ? 'default' : 'outline'}
+                      className={`h-7 text-xs font-semibold px-2.5 ${dischargeTabFilter === 'inpatients' ? 'bg-blue-600 text-white' : 'bg-white text-slate-700'}`}
+                      onClick={() => setDischargeTabFilter('inpatients')}
+                    >
+                      Active Inpatients ({activeInpatientsForDischarge.length})
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant={dischargeTabFilter === 'routine' ? 'default' : 'outline'}
+                      className={`h-7 text-xs font-semibold px-2.5 ${dischargeTabFilter === 'routine' ? 'bg-emerald-600 text-white' : 'bg-white text-slate-700'}`}
+                      onClick={() => setDischargeTabFilter('routine')}
+                    >
+                      Routine / Improved
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant={dischargeTabFilter === 'lama' ? 'default' : 'outline'}
+                      className={`h-7 text-xs font-semibold px-2.5 ${dischargeTabFilter === 'lama' ? 'bg-amber-600 text-white' : 'bg-white text-slate-700'}`}
+                      onClick={() => setDischargeTabFilter('lama')}
+                    >
+                      LAMA Cases
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant={dischargeTabFilter === 'deceased' ? 'default' : 'outline'}
+                      className={`h-7 text-xs font-semibold px-2.5 ${dischargeTabFilter === 'deceased' ? 'bg-rose-600 text-white' : 'bg-white text-slate-700'}`}
+                      onClick={() => setDischargeTabFilter('deceased')}
+                    >
+                      Deceased
                     </Button>
                   </div>
-                ))}
+
+                  {/* Search Bar */}
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+                    <Input 
+                      placeholder="Search by patient name, MRN, phone, doctor, diagnosis, ward..." 
+                      value={dischargeSearchQuery}
+                      onChange={(e) => setDischargeSearchQuery(e.target.value)}
+                      className="h-8 pl-8 text-xs bg-white border-slate-300"
+                    />
+                    {dischargeSearchQuery && (
+                      <button 
+                        onClick={() => setDischargeSearchQuery('')}
+                        className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 text-xs"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+
+              <CardContent className="p-4 space-y-3 max-h-[640px] overflow-y-auto">
+                {/* List of records */}
+                {(() => {
+                  let list: any[] = [];
+                  if (dischargeTabFilter === 'inpatients') {
+                    list = activeInpatientsForDischarge;
+                  } else if (dischargeTabFilter === 'routine') {
+                    list = allDischargedPatientsList.filter(s => s.dischargeType?.toLowerCase().includes('routine') || s.dischargeType?.toLowerCase().includes('improved'));
+                  } else if (dischargeTabFilter === 'lama') {
+                    list = allDischargedPatientsList.filter(s => s.dischargeType?.toLowerCase().includes('lama'));
+                  } else if (dischargeTabFilter === 'deceased') {
+                    list = allDischargedPatientsList.filter(s => s.dischargeType?.toLowerCase().includes('deceased') || s.dischargeType?.toLowerCase().includes('expired'));
+                  } else {
+                    list = allDischargedPatientsList;
+                  }
+
+                  if (dischargeSearchQuery.trim()) {
+                    const q = dischargeSearchQuery.toLowerCase().trim();
+                    list = list.filter(item => {
+                      const pName = (item.patientName || item.name || '').toLowerCase();
+                      const pMrn = (item.mrn || '').toLowerCase();
+                      const pPhone = (item.phone || '').toLowerCase();
+                      const pDoc = (item.dischargeBy || item.attendingDoctor || '').toLowerCase();
+                      const pDiag = (item.primaryDiagnosis || item.diagnosis || '').toLowerCase();
+                      const pWard = (item.ward || '').toLowerCase();
+                      return pName.includes(q) || pMrn.includes(q) || pPhone.includes(q) || pDoc.includes(q) || pDiag.includes(q) || pWard.includes(q);
+                    });
+                  }
+
+                  if (list.length === 0) {
+                    return (
+                      <div className="p-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                        <FileText className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                        <p className="text-xs font-bold text-slate-700">No discharge records match your criteria</p>
+                        <p className="text-[11px] text-slate-500 mt-1">Try changing the search keyword or selecting a different tab filter.</p>
+                      </div>
+                    );
+                  }
+
+                  return list.map((item) => {
+                    const isAdmitted = item.status === 'Admitted' || dischargeTabFilter === 'inpatients';
+                    const isLama = String(item.dischargeType).toLowerCase().includes('lama');
+                    const isDeceased = String(item.dischargeType).toLowerCase().includes('deceased') || String(item.dischargeType).toLowerCase().includes('expired');
+
+                    return (
+                      <div 
+                        key={item.id} 
+                        className="p-3.5 border border-slate-200 rounded-xl bg-white hover:border-teal-300 hover:shadow-xs transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                      >
+                        {/* Patient info */}
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-slate-900 text-sm">{item.patientName || item.name || 'Inpatient'}</span>
+                            <Badge variant="outline" className="font-mono text-[10px] text-teal-700 bg-teal-50 border-teal-200">
+                              {item.mrn || 'MRN-IPD'}
+                            </Badge>
+                            <Badge className={
+                              isAdmitted ? "bg-blue-600 text-white text-[10px]" :
+                              isDeceased ? "bg-rose-600 text-white text-[10px]" :
+                              isLama ? "bg-amber-500 text-white text-[10px]" :
+                              "bg-emerald-600 text-white text-[10px]"
+                            }>
+                              {item.dischargeType || (isAdmitted ? 'Active Inpatient' : 'Discharged')}
+                            </Badge>
+                          </div>
+
+                          <div className="text-[11px] text-slate-600 flex items-center gap-2 flex-wrap">
+                            <span><strong>Ward/Bed:</strong> {item.ward || 'General Ward'} / {item.bedNumber || 'Bed-01'}</span>
+                            <span>•</span>
+                            <span><strong>Adm:</strong> {formatDate(item.admissionDate)}</span>
+                            {!isAdmitted && item.dischargeDate && (
+                              <>
+                                <span>•</span>
+                                <span><strong>Disch:</strong> {formatDate(item.dischargeDate)}</span>
+                              </>
+                            )}
+                            <span>•</span>
+                            <span><strong>Doc:</strong> {item.dischargeBy || item.attendingDoctor || 'Dr. Rajesh Sharma'}</span>
+                          </div>
+
+                          {item.primaryDiagnosis && (
+                            <p className="text-[11px] text-slate-700 bg-slate-50 px-2 py-1 rounded border border-slate-100 line-clamp-1">
+                              <strong>Diagnosis:</strong> {item.primaryDiagnosis}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Action buttons */}
+                        <div className="flex items-center gap-1.5 flex-wrap self-end sm:self-center shrink-0">
+                          {isAdmitted ? (
+                            <Button 
+                              size="sm" 
+                              className="h-8 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 shadow-xs"
+                              onClick={() => {
+                                handleSelectPatientForDischarge(item.patientId || item.id);
+                                toast.info(`Loaded ${item.patientName} into discharge editor`);
+                              }}
+                            >
+                              <Receipt className="w-3.5 h-3.5" />
+                              Prepare Discharge
+                            </Button>
+                          ) : (
+                            <>
+                              <Button 
+                                size="sm" 
+                                className="h-8 text-xs font-bold bg-teal-600 hover:bg-teal-700 text-white gap-1.5 shadow-xs"
+                                onClick={() => handleOpenDischargeSummaryModal(item)}
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                                View & Print
+                              </Button>
+
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                className="h-8 text-xs font-semibold text-slate-700 border-slate-200 hover:bg-slate-50 gap-1 px-2"
+                                title="One-Click Direct Print"
+                                onClick={() => handleDirectPrintSummary(item)}
+                              >
+                                <Printer className="w-3 h-3 text-teal-600" />
+                                Quick Print
+                              </Button>
+
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                className="h-8 text-xs font-semibold text-slate-700 border-slate-200 hover:bg-slate-50 gap-1 px-2"
+                                title="Edit Summary"
+                                onClick={() => {
+                                  handleSelectPatientForDischarge(item.patientId || item.id);
+                                  toast.info(`Summary loaded for editing.`);
+                                }}
+                              >
+                                <Edit className="w-3 h-3 text-slate-600" />
+                              </Button>
+
+                              {item.phone && (
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  className="h-8 text-xs font-semibold text-emerald-700 border-emerald-200 hover:bg-emerald-50 px-2"
+                                  title="Send WhatsApp"
+                                  onClick={() => {
+                                    const text = `*GASTRO PLUS HOSPITAL - DISCHARGE SUMMARY*\n\n` +
+                                      `*Patient:* ${item.patientName} (${item.mrn})\n` +
+                                      `*Discharge Date:* ${formatDate(item.dischargeDate)}\n` +
+                                      `*Status:* ${item.dischargeType}\n` +
+                                      `*Consultant:* ${item.dischargeBy || 'Dr. Rajesh Sharma'}\n\n` +
+                                      `*Diagnosis:* ${item.primaryDiagnosis || 'Inpatient Management'}\n` +
+                                      `*Follow-Up:* ${item.followUpDate ? formatDate(item.followUpDate) : 'In 7 days in OPD'}\n\n` +
+                                      `*Emergency Helpline:* 9109102145 (24x7)`;
+                                    sendWhatsAppMessage(item.phone, text);
+                                    toast.success(`Opening WhatsApp for ${item.patientName}`);
+                                  }}
+                                >
+                                  <Share2 className="w-3 h-3 text-emerald-600" />
+                                </Button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
               </CardContent>
             </Card>
           </div>
@@ -2865,11 +4334,194 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
         </DialogContent>
       </Dialog>
 
+      {/* Edit Referral & Reference Modal */}
+      <Dialog open={isEditReferralOpen} onOpenChange={setIsEditReferralOpen}>
+        <DialogContent className="max-w-2xl bg-white p-6">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <ArrowUpRight className="w-5 h-5 text-teal-600" />
+              Edit Referral & Reference Information
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              Update external referring doctor, clinic, reference slip number, and clinical referral details for <span className="font-bold text-slate-800">{editingReferralPatient?.name} ({editingReferralPatient?.mrn})</span>.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2 text-xs">
+            <div className="flex items-center space-x-2 bg-teal-50 p-3 rounded-lg border border-teal-200">
+              <input 
+                type="checkbox" 
+                id="edit-modal-is-referral"
+                className="h-4 w-4 rounded text-teal-600 focus:ring-teal-500 cursor-pointer"
+                checked={editingReferralForm.isReferral}
+                onChange={(e) => setEditingReferralForm({...editingReferralForm, isReferral: e.target.checked})}
+              />
+              <label htmlFor="edit-modal-is-referral" className="font-bold text-teal-950 cursor-pointer select-none">
+                Mark as Active Referral Case (Doctor / Hospital Reference)
+              </label>
+            </div>
+
+            {editingReferralForm.isReferral && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label className="font-semibold text-slate-700">Referral Category</Label>
+                    <Select 
+                      value={editingReferralForm.referralType || 'Doctor'} 
+                      onValueChange={(v) => setEditingReferralForm({...editingReferralForm, referralType: v})}
+                    >
+                      <SelectTrigger className="h-8 text-xs bg-white"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Doctor">Doctor / Consultant</SelectItem>
+                        <SelectItem value="Clinic">Clinic / PolyClinic</SelectItem>
+                        <SelectItem value="Hospital">Hospital / Nursing Home</SelectItem>
+                        <SelectItem value="Diagnostic">Diagnostic Centre</SelectItem>
+                        <SelectItem value="Emergency">Emergency / Ambulance</SelectItem>
+                        <SelectItem value="Other">Other Reference</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="font-semibold text-slate-700">Referred By (Dr. Name)</Label>
+                    <Input 
+                      value={editingReferralForm.referredBy} 
+                      onChange={(e) => setEditingReferralForm({...editingReferralForm, referredBy: e.target.value})}
+                      placeholder="e.g. Dr. Rajesh Verma"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="font-semibold text-slate-700">Ref / Slip / Letter No.</Label>
+                    <Input 
+                      value={editingReferralForm.referralReferenceNo} 
+                      onChange={(e) => setEditingReferralForm({...editingReferralForm, referralReferenceNo: e.target.value})}
+                      placeholder="e.g. REF-2026-804"
+                      className="h-8 text-xs font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label className="font-semibold text-slate-700">Referring Hospital / Clinic</Label>
+                    <Input 
+                      value={editingReferralForm.referralHospital} 
+                      onChange={(e) => setEditingReferralForm({...editingReferralForm, referralHospital: e.target.value})}
+                      placeholder="e.g. Apex Clinic"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="font-semibold text-slate-700">Doctor / Center Phone</Label>
+                    <Input 
+                      value={editingReferralForm.referralContact} 
+                      onChange={(e) => setEditingReferralForm({...editingReferralForm, referralContact: e.target.value})}
+                      placeholder="e.g. 9876543210"
+                      className="h-8 text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="font-semibold text-slate-700">Referral Date</Label>
+                    <Input 
+                      type="date"
+                      value={editingReferralForm.referralDate} 
+                      onChange={(e) => setEditingReferralForm({...editingReferralForm, referralDate: e.target.value})}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="font-semibold text-slate-700">Referral Indication / Clinical Reason</Label>
+                  <Input 
+                    value={editingReferralForm.referralReason} 
+                    onChange={(e) => setEditingReferralForm({...editingReferralForm, referralReason: e.target.value})}
+                    placeholder="Reason for referral / provisional diagnosis"
+                    className="h-8 text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="font-semibold text-slate-700">Hospital Follow-up Notes / Instructions</Label>
+                  <Input 
+                    value={editingReferralForm.referralNotes} 
+                    onChange={(e) => setEditingReferralForm({...editingReferralForm, referralNotes: e.target.value})}
+                    placeholder="Feedback / notes for referring doctor"
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setIsEditReferralOpen(false)} className="text-xs">
+              Cancel
+            </Button>
+            <Button 
+              size="sm" 
+              className="bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs"
+              onClick={async () => {
+                if (!editingReferralPatient) return;
+                const updatePayload = {
+                  is_referral: editingReferralForm.isReferral,
+                  isReferral: editingReferralForm.isReferral,
+                  referred_by: editingReferralForm.isReferral ? (editingReferralForm.referredBy || 'Medical Practitioner') : null,
+                  referredBy: editingReferralForm.isReferral ? (editingReferralForm.referredBy || 'Medical Practitioner') : null,
+                  referral_hospital: editingReferralForm.isReferral ? editingReferralForm.referralHospital : null,
+                  referralHospital: editingReferralForm.isReferral ? editingReferralForm.referralHospital : null,
+                  referral_reference_no: editingReferralForm.isReferral ? editingReferralForm.referralReferenceNo : null,
+                  referralReferenceNo: editingReferralForm.isReferral ? editingReferralForm.referralReferenceNo : null,
+                  referral_contact: editingReferralForm.isReferral ? editingReferralForm.referralContact : null,
+                  referralContact: editingReferralForm.isReferral ? editingReferralForm.referralContact : null,
+                  referral_reason: editingReferralForm.isReferral ? editingReferralForm.referralReason : null,
+                  referralReason: editingReferralForm.isReferral ? editingReferralForm.referralReason : null,
+                  referral_type: editingReferralForm.isReferral ? editingReferralForm.referralType : null,
+                  referralType: editingReferralForm.isReferral ? editingReferralForm.referralType : null,
+                  referral_date: editingReferralForm.isReferral ? editingReferralForm.referralDate : null,
+                  referralDate: editingReferralForm.isReferral ? editingReferralForm.referralDate : null,
+                  referral_notes: editingReferralForm.isReferral ? editingReferralForm.referralNotes : null,
+                  referralNotes: editingReferralForm.isReferral ? editingReferralForm.referralNotes : null
+                };
+
+                const res = await supabaseService.updatePatient(editingReferralPatient.id, updatePayload);
+                if (res) {
+                  setPatients(prev => prev.map(p => p.id === editingReferralPatient.id ? { ...p, ...updatePayload } : p));
+                  toast.success('Referral and reference details updated successfully!');
+                  setIsEditReferralOpen(false);
+                  fetchData();
+                } else {
+                  toast.error('Failed to update referral details.');
+                }
+              }}
+            >
+              Save Reference Details
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Subcomponent Dialogs */}
       <AdmissionSheetModal isOpen={isAdmissionSheetOpen} onClose={() => setIsAdmissionSheetOpen(false)} patient={admissionSheetPatient} admission={admissionSheetAdmission} />
       <PoorPrognosisConsentModal isOpen={isPoorPrognosisOpen} onClose={() => setIsPoorPrognosisOpen(false)} patient={poorPrognosisPatient} admission={poorPrognosisAdmission} />
       <GeneralConsentModal isOpen={isGeneralConsentOpen} onClose={() => setIsGeneralConsentOpen(false)} patient={generalConsentPatient} admission={generalConsentAdmission} existingConsent={selectedGeneralConsent} />
       <AnaestheticOperationRecord isOpen={isAorOpen} onClose={() => setIsAorOpen(false)} patientData={aorPatientData} />
+      <DischargeSummaryModal 
+        isOpen={isSummaryDetailsOpen} 
+        onClose={() => setIsSummaryDetailsOpen(false)} 
+        summary={dischargedSummaryToShow}
+        patient={patients.find(p => String(p.id) === String(dischargedSummaryToShow?.patientId || dischargedSummaryToShow?.patient_id)) || MOCK_PATIENTS.find(p => String(p.id) === String(dischargedSummaryToShow?.patientId || dischargedSummaryToShow?.patient_id))}
+        admission={admissions.find(a => String(a.id) === String(dischargedSummaryToShow?.admissionId || dischargedSummaryToShow?.admission_id) || String(a.patient_id || a.patientId) === String(dischargedSummaryToShow?.patientId || dischargedSummaryToShow?.patient_id))}
+        onEdit={(summary) => {
+          handleSelectPatientForDischarge(summary.patientId || summary.patient_id);
+          setIsSummaryDetailsOpen(false);
+          toast.info('Summary loaded into the discharge editor.');
+        }}
+      />
     </div>
   );
 }
