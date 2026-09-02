@@ -126,7 +126,8 @@ export function getPrescriptionPrintHtml(
   prescription: PrintPrescription,
   doctor?: PrintDoctor,
   hospitalInfo?: { name?: string; address?: string; phone?: string; email?: string; website?: string; logo?: string | null; subTitle?: string; reviewUrl?: string },
-  templateImage?: string | null
+  templateImage?: string | null,
+  isBlank?: boolean
 ): string {
   const actualTemplateImage = templateImage !== undefined ? templateImage : (typeof window !== 'undefined' ? localStorage.getItem('hms_template_image') : null);
 
@@ -308,7 +309,19 @@ export function getPrescriptionPrintHtml(
   // Format valid medicines list entered by doctor
   const validMedicines = (prescription.medicines || []).filter(m => m && m.name && m.name.trim() !== '');
   let medContent = '';
-  if (validMedicines.length > 0) {
+  if (isBlank) {
+    medContent = Array.from({ length: 8 }).map((_, idx) => `
+      <tr style="height: 38px; border-bottom: 1px dashed #cbd5e1; page-break-inside: avoid;">
+        <td style="padding: 10px 8px; font-weight: 700; color: #94a3b8; font-size: 11px; width: 5%; text-align: center;">
+          ${idx + 1}.
+        </td>
+        <td style="padding: 10px 8px; width: 42%;"></td>
+        <td style="padding: 10px 8px; width: 16%;"></td>
+        <td style="padding: 10px 8px; width: 22%;"></td>
+        <td style="padding: 10px 8px; width: 15%;"></td>
+      </tr>
+    `).join('');
+  } else if (validMedicines.length > 0) {
     medContent = validMedicines.map((m, idx) => {
       const nameStr = m.name || 'Medicine';
       const dosageStr = m.dosage || '-';
@@ -774,163 +787,164 @@ export function getPrescriptionPrintHtml(
               </div>
             ` : ''}
 
-            <!-- DYNAMIC CLINICAL NOTES SECTIONS (ONLY WHAT THE DOCTOR WROTE) -->
-
-            <!-- 1. CHIEF COMPLAINTS -->
-            ${complaintsText ? `
-              <div class="clinical-card">
-                <div class="clinical-icon">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#003d46" stroke-width="2.2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                </div>
-                <div style="flex: 1;">
-                  <div style="font-size: 8.5px; font-weight: 900; color: #003d46; text-transform: uppercase; letter-spacing: 0.5px;">CHIEF COMPLAINTS / PRESENTING SYMPTOMS</div>
-                  <div style="font-size: 11px; font-weight: 700; color: #0f172a; margin-top: 1px; white-space: pre-wrap; line-height: 1.35;">${complaintsText}</div>
-                </div>
-              </div>
-            ` : ''}
-
-            <!-- 2. DOCUMENTED ALLERGIES -->
-            ${allergiesText ? `
-              <div class="clinical-card" style="border-left: 3px solid #ea580c;">
-                <div class="clinical-icon">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2.2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                </div>
-                <div style="flex: 1;">
-                  <div style="font-size: 8.5px; font-weight: 900; color: #ea580c; text-transform: uppercase; letter-spacing: 0.5px;">DOCUMENTED ALLERGIES & DRUG SENSITIVITIES</div>
-                  <div style="font-size: 11px; font-weight: 700; color: #7f1d1d; margin-top: 1px; white-space: pre-wrap;">${allergiesText}</div>
-                </div>
-              </div>
-            ` : `
-              <div style="padding: 2px 6px; margin-bottom: 4px; font-size: 9.5px; color: #166534; font-weight: 700; display: flex; align-items: center; gap: 4px;">
-                <span>🛡️ Allergies:</span>
-                <span>No Known Drug Allergies (NKDA)</span>
-              </div>
-            `}
-
-            <!-- 3. CLINICAL & PAST MEDICAL HISTORY -->
-            ${pastHist ? `
-              <div class="clinical-card" style="border-left: 3px solid #16a34a;">
-                <div class="clinical-icon">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><polyline points="9 11 12 14 22 4"/></svg>
-                </div>
-                <div style="flex: 1;">
-                  <div style="font-size: 8.5px; font-weight: 900; color: #16a34a; text-transform: uppercase; letter-spacing: 0.5px;">CLINICAL & PAST MEDICAL HISTORY</div>
-                  <div style="font-size: 11px; font-weight: 700; color: #0f172a; margin-top: 1px; white-space: pre-wrap; line-height: 1.35;">${pastHist}</div>
-                </div>
-              </div>
-            ` : ''}
-
-            <!-- 4. DIAGNOSIS / CLINICAL IMPRESSION -->
-            ${diag ? `
-              <div class="clinical-card" style="border-left: 3px solid #dc2626; background-color: #fef2f2;">
-                <div class="clinical-icon" style="background-color: #fee2e2;">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.2"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-                </div>
-                <div style="flex: 1;">
-                  <div style="font-size: 8.5px; font-weight: 900; color: #dc2626; text-transform: uppercase; letter-spacing: 0.5px;">DIAGNOSIS / CLINICAL IMPRESSION</div>
-                  <div style="font-size: 11.5px; font-weight: 800; color: #0f172a; margin-top: 1px; white-space: pre-wrap;">${diag}</div>
-                </div>
-              </div>
-            ` : ''}
-
-            <!-- 5. EXAMINATION FINDINGS (O/E FINDINGS) -->
-            ${examFindings ? `
-              <div class="clinical-card" style="border-left: 3px solid #0d9488;">
-                <div class="clinical-icon">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                </div>
-                <div style="flex: 1;">
-                  <div style="font-size: 8.5px; font-weight: 900; color: #0d9488; text-transform: uppercase; letter-spacing: 0.5px;">EXAMINATION FINDINGS (O/E FINDINGS)</div>
-                  <div style="font-size: 10.5px; font-weight: 600; color: #0f172a; margin-top: 1px; line-height: 1.4; white-space: pre-wrap;">${examFindings}</div>
-                </div>
-              </div>
-            ` : ''}
-
-            <!-- 6. CLINICAL REMARKS, SUGGESTIONS & ADVICE -->
-            ${advText ? `
-              <div class="clinical-card" style="border-left: 3px solid #16a34a; margin-bottom: 6px;">
-                <div class="clinical-icon">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.2"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
-                </div>
-                <div style="flex: 1;">
-                  <div style="font-size: 8.5px; font-weight: 900; color: #16a34a; text-transform: uppercase; letter-spacing: 0.5px;">CLINICAL REMARKS & ADVICE</div>
-                  <div style="font-size: 10.5px; font-weight: 600; color: #0f172a; margin-top: 2px;">
-                    ${adviceFormattedHtml}
+            <!-- DYNAMIC CLINICAL NOTES SECTIONS (ONLY WHAT THE DOCTOR WROTE, SUPPRESSED IF BLANK PRESCRIPTION) -->
+            ${!isBlank ? `
+              <!-- 1. CHIEF COMPLAINTS -->
+              ${complaintsText ? `
+                <div class="clinical-card">
+                  <div class="clinical-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#003d46" stroke-width="2.2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                  </div>
+                  <div style="flex: 1;">
+                    <div style="font-size: 8.5px; font-weight: 900; color: #003d46; text-transform: uppercase; letter-spacing: 0.5px;">CHIEF COMPLAINTS / PRESENTING SYMPTOMS</div>
+                    <div style="font-size: 11px; font-weight: 700; color: #0f172a; margin-top: 1px; white-space: pre-wrap; line-height: 1.35;">${complaintsText}</div>
                   </div>
                 </div>
-              </div>
-            ` : ''}
+              ` : ''}
 
-            <!-- 7. INVESTIGATIONS ADVISED -->
-            ${invStr ? `
-              <div class="clinical-card" style="border-left: 3px solid #4338ca;">
-                <div class="clinical-icon">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4338ca" stroke-width="2.2"><path d="M10 2v7.31M14 2v7.31M8.5 2h7M14 9.3a6.5 6.5 0 1 1-4 0"/></svg>
+              <!-- 2. DOCUMENTED ALLERGIES -->
+              ${allergiesText ? `
+                <div class="clinical-card" style="border-left: 3px solid #ea580c;">
+                  <div class="clinical-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2.2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  </div>
+                  <div style="flex: 1;">
+                    <div style="font-size: 8.5px; font-weight: 900; color: #ea580c; text-transform: uppercase; letter-spacing: 0.5px;">DOCUMENTED ALLERGIES & DRUG SENSITIVITIES</div>
+                    <div style="font-size: 11px; font-weight: 700; color: #7f1d1d; margin-top: 1px; white-space: pre-wrap;">${allergiesText}</div>
+                  </div>
                 </div>
-                <div style="flex: 1;">
-                  <div style="font-size: 8.5px; font-weight: 900; color: #4338ca; text-transform: uppercase; letter-spacing: 0.5px;">INVESTIGATIONS / LAB & RADIOLOGY ADVISED</div>
-                  <div style="font-size: 11px; font-weight: 700; color: #1e1b4b; margin-top: 1px;">${invStr}</div>
+              ` : `
+                <div style="padding: 2px 6px; margin-bottom: 4px; font-size: 9.5px; color: #166534; font-weight: 700; display: flex; align-items: center; gap: 4px;">
+                  <span>🛡️ Allergies:</span>
+                  <span>No Known Drug Allergies (NKDA)</span>
                 </div>
-              </div>
-            ` : ''}
+              `}
 
-            <!-- 8. PLANNED SURGERY / ADMISSION IF ANY -->
-            ${(planSurgeryNeeded || plannedSurgeryName) ? `
-              <div class="clinical-card" style="border-left: 3px solid #ea580c; background-color: #fff7ed;">
-                <div class="clinical-icon" style="background-color: #ffedd5;">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2.2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/></svg>
+              <!-- 3. CLINICAL & PAST MEDICAL HISTORY -->
+              ${pastHist ? `
+                <div class="clinical-card" style="border-left: 3px solid #16a34a;">
+                  <div class="clinical-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><polyline points="9 11 12 14 22 4"/></svg>
+                  </div>
+                  <div style="flex: 1;">
+                    <div style="font-size: 8.5px; font-weight: 900; color: #16a34a; text-transform: uppercase; letter-spacing: 0.5px;">CLINICAL & PAST MEDICAL HISTORY</div>
+                    <div style="font-size: 11px; font-weight: 700; color: #0f172a; margin-top: 1px; white-space: pre-wrap; line-height: 1.35;">${pastHist}</div>
+                  </div>
                 </div>
-                <div style="flex: 1;">
-                  <div style="font-size: 8.5px; font-weight: 900; color: #c2410c; text-transform: uppercase; letter-spacing: 0.5px;">PLANNED / ADVISED SURGERY</div>
-                  <div style="font-size: 11.5px; font-weight: 800; color: #9a3412;">${plannedSurgeryName || 'Surgery Advised'} ${plannedSurgeryDate ? `(Date: ${plannedSurgeryDate})` : ''}</div>
-                  ${plannedSurgeryNotes ? `<div style="font-size: 10px; font-weight: 600; color: #7c2d12; margin-top: 2px;">${plannedSurgeryNotes}</div>` : ''}
-                </div>
-              </div>
-            ` : ''}
+              ` : ''}
 
-            ${(admitNeeded && admitNeeded !== 'No' && admitNeeded !== 'Not Required') ? `
-              <div class="clinical-card" style="border-left: 3px solid #dc2626; background-color: #fef2f2;">
-                <div class="clinical-icon" style="background-color: #fee2e2;">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+              <!-- 4. DIAGNOSIS / CLINICAL IMPRESSION -->
+              ${diag ? `
+                <div class="clinical-card" style="border-left: 3px solid #dc2626; background-color: #fef2f2;">
+                  <div class="clinical-icon" style="background-color: #fee2e2;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.2"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                  </div>
+                  <div style="flex: 1;">
+                    <div style="font-size: 8.5px; font-weight: 900; color: #dc2626; text-transform: uppercase; letter-spacing: 0.5px;">DIAGNOSIS / CLINICAL IMPRESSION</div>
+                    <div style="font-size: 11.5px; font-weight: 800; color: #0f172a; margin-top: 1px; white-space: pre-wrap;">${diag}</div>
+                  </div>
                 </div>
-                <div style="flex: 1;">
-                  <div style="font-size: 8.5px; font-weight: 900; color: #dc2626; text-transform: uppercase; letter-spacing: 0.5px;">HOSPITALIZATION / ADMISSION ADVICE</div>
-                  <div style="font-size: 11px; font-weight: 800; color: #991b1b;">Admission Advised ${admitWardType ? `[Ward: ${admitWardType}]` : ''}</div>
-                  ${admitReason ? `<div style="font-size: 10px; font-weight: 600; color: #7f1d1d; margin-top: 2px;">Reason: ${admitReason}</div>` : ''}
+              ` : ''}
+
+              <!-- 5. EXAMINATION FINDINGS (O/E FINDINGS) -->
+              ${examFindings ? `
+                <div class="clinical-card" style="border-left: 3px solid #0d9488;">
+                  <div class="clinical-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  </div>
+                  <div style="flex: 1;">
+                    <div style="font-size: 8.5px; font-weight: 900; color: #0d9488; text-transform: uppercase; letter-spacing: 0.5px;">EXAMINATION FINDINGS (O/E FINDINGS)</div>
+                    <div style="font-size: 10.5px; font-weight: 600; color: #0f172a; margin-top: 1px; line-height: 1.4; white-space: pre-wrap;">${examFindings}</div>
+                  </div>
                 </div>
-              </div>
-            ` : ''}
+              ` : ''}
 
-            <!-- 9. FOLLOW-UP DATE IF ANY -->
-            ${prescription.followUpDate ? `
-              <div style="display: flex; align-items: center; gap: 6px; padding: 4px 8px; background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 4px; margin-bottom: 6px; font-size: 10.5px; font-weight: 800; color: #047857;">
-                <span>📅 Next Follow-Up Visit Date:</span>
-                <span style="color: #065f46;">${prescription.followUpDate}</span>
-              </div>
-            ` : ''}
-
-            <!-- 10. DRAWING / DIAGRAM -->
-            ${drawImg ? `
-              <div style="margin-top: 6px; margin-bottom: 6px; page-break-inside: avoid;">
-                <div style="font-size: 8.5px; font-weight: 900; color: #7c3aed; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">CLINICAL DIAGRAM / ANNOTATIONS:</div>
-                <div style="background: white; border: 1px solid #cbd5e1; border-radius: 4px; padding: 4px; text-align: center; display: inline-block;">
-                  <img src="${drawImg}" style="max-height: 160px; max-width: 100%; display: block; margin: 0 auto; object-fit: contain;" />
-                </div>
-              </div>
-            ` : ''}
-
-            <!-- 11. ATTACHED PHOTOS -->
-            ${(photoList && photoList.length > 0) ? `
-              <div style="margin-top: 6px; margin-bottom: 6px; page-break-inside: avoid;">
-                <div style="font-size: 8.5px; font-weight: 900; color: #2563eb; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">CLINICAL PHOTOS ATTACHED:</div>
-                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                  ${photoList.map((ph, idx) => `
-                    <div style="border: 1px solid #cbd5e1; border-radius: 4px; overflow: hidden; background: white; text-align: center;">
-                      <img src="${ph}" style="max-height: 120px; max-width: 160px; display: block; object-fit: contain; padding: 2px;" alt="Photo ${idx + 1}" />
+              <!-- 6. CLINICAL REMARKS, SUGGESTIONS & ADVICE -->
+              ${advText ? `
+                <div class="clinical-card" style="border-left: 3px solid #16a34a; margin-bottom: 6px;">
+                  <div class="clinical-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.2"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
+                  </div>
+                  <div style="flex: 1;">
+                    <div style="font-size: 8.5px; font-weight: 900; color: #16a34a; text-transform: uppercase; letter-spacing: 0.5px;">CLINICAL REMARKS & ADVICE</div>
+                    <div style="font-size: 10.5px; font-weight: 600; color: #0f172a; margin-top: 2px;">
+                      ${adviceFormattedHtml}
                     </div>
-                  `).join('')}
+                  </div>
                 </div>
-              </div>
+              ` : ''}
+
+              <!-- 7. INVESTIGATIONS ADVISED -->
+              ${invStr ? `
+                <div class="clinical-card" style="border-left: 3px solid #4338ca;">
+                  <div class="clinical-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4338ca" stroke-width="2.2"><path d="M10 2v7.31M14 2v7.31M8.5 2h7M14 9.3a6.5 6.5 0 1 1-4 0"/></svg>
+                  </div>
+                  <div style="flex: 1;">
+                    <div style="font-size: 8.5px; font-weight: 900; color: #4338ca; text-transform: uppercase; letter-spacing: 0.5px;">INVESTIGATIONS / LAB & RADIOLOGY ADVISED</div>
+                    <div style="font-size: 11px; font-weight: 700; color: #1e1b4b; margin-top: 1px;">${invStr}</div>
+                  </div>
+                </div>
+              ` : ''}
+
+              <!-- 8. PLANNED SURGERY / ADMISSION IF ANY -->
+              ${(planSurgeryNeeded || plannedSurgeryName) ? `
+                <div class="clinical-card" style="border-left: 3px solid #ea580c; background-color: #fff7ed;">
+                  <div class="clinical-icon" style="background-color: #ffedd5;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2.2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/></svg>
+                  </div>
+                  <div style="flex: 1;">
+                    <div style="font-size: 8.5px; font-weight: 900; color: #c2410c; text-transform: uppercase; letter-spacing: 0.5px;">PLANNED / ADVISED SURGERY</div>
+                    <div style="font-size: 11.5px; font-weight: 800; color: #9a3412;">${plannedSurgeryName || 'Surgery Advised'} ${plannedSurgeryDate ? `(Date: ${plannedSurgeryDate})` : ''}</div>
+                    ${plannedSurgeryNotes ? `<div style="font-size: 10px; font-weight: 600; color: #7c2d12; margin-top: 2px;">${plannedSurgeryNotes}</div>` : ''}
+                  </div>
+                </div>
+              ` : ''}
+
+              ${(admitNeeded && admitNeeded !== 'No' && admitNeeded !== 'Not Required') ? `
+                <div class="clinical-card" style="border-left: 3px solid #dc2626; background-color: #fef2f2;">
+                  <div class="clinical-icon" style="background-color: #fee2e2;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                  </div>
+                  <div style="flex: 1;">
+                    <div style="font-size: 8.5px; font-weight: 900; color: #dc2626; text-transform: uppercase; letter-spacing: 0.5px;">HOSPITALIZATION / ADMISSION ADVICE</div>
+                    <div style="font-size: 11px; font-weight: 800; color: #991b1b;">Admission Advised ${admitWardType ? `[Ward: ${admitWardType}]` : ''}</div>
+                    ${admitReason ? `<div style="font-size: 10px; font-weight: 600; color: #7f1d1d; margin-top: 2px;">Reason: ${admitReason}</div>` : ''}
+                  </div>
+                </div>
+              ` : ''}
+
+              <!-- 9. FOLLOW-UP DATE IF ANY -->
+              ${prescription.followUpDate ? `
+                <div style="display: flex; align-items: center; gap: 6px; padding: 4px 8px; background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 4px; margin-bottom: 6px; font-size: 10.5px; font-weight: 800; color: #047857;">
+                  <span>📅 Next Follow-Up Visit Date:</span>
+                  <span style="color: #065f46;">${prescription.followUpDate}</span>
+                </div>
+              ` : ''}
+
+              <!-- 10. DRAWING / DIAGRAM -->
+              ${drawImg ? `
+                <div style="margin-top: 6px; margin-bottom: 6px; page-break-inside: avoid;">
+                  <div style="font-size: 8.5px; font-weight: 900; color: #7c3aed; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">CLINICAL DIAGRAM / ANNOTATIONS:</div>
+                  <div style="background: white; border: 1px solid #cbd5e1; border-radius: 4px; padding: 4px; text-align: center; display: inline-block;">
+                    <img src="${drawImg}" style="max-height: 160px; max-width: 100%; display: block; margin: 0 auto; object-fit: contain;" />
+                  </div>
+                </div>
+              ` : ''}
+
+              <!-- 11. ATTACHED PHOTOS -->
+              ${(photoList && photoList.length > 0) ? `
+                <div style="margin-top: 6px; margin-bottom: 6px; page-break-inside: avoid;">
+                  <div style="font-size: 8.5px; font-weight: 900; color: #2563eb; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">CLINICAL PHOTOS ATTACHED:</div>
+                  <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                    ${photoList.map((ph, idx) => `
+                      <div style="border: 1px solid #cbd5e1; border-radius: 4px; overflow: hidden; background: white; text-align: center;">
+                        <img src="${ph}" style="max-height: 120px; max-width: 160px; display: block; object-fit: contain; padding: 2px;" alt="Photo ${idx + 1}" />
+                      </div>
+                    `).join('')}
+                  </div>
+                </div>
+              ` : ''}
             ` : ''}
 
             <!-- MEDICINE PRESCRIPTION TABLE -->

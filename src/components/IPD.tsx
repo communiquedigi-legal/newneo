@@ -1977,9 +1977,11 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
                   <Select value={dischargeForm.patientId} onValueChange={(v) => handleSelectPatientForDischarge(v)}>
                     <SelectTrigger className="h-8 text-xs bg-white"><SelectValue placeholder="Choose patient" /></SelectTrigger>
                     <SelectContent>
-                      {patients.map(p => (
-                        <SelectItem key={p.id} value={p.id}>{p.name} ({p.mrn})</SelectItem>
-                      ))}
+                      {admissions.filter(a => a.status === 'Admitted').map(adm => {
+                        const p = patients.find(pat => String(pat.id) === String(adm.patient_id) || String(pat.id) === String(adm.patientId));
+                        if (!p) return null;
+                        return <SelectItem key={p.id} value={p.id}>{p.name} ({p.mrn}) - Bed: {adm.ward}/{adm.bed_id}</SelectItem>;
+                      })}
                     </SelectContent>
                   </Select>
                 </div>

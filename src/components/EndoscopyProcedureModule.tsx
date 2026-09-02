@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { format } from 'date-fns';
 import { 
   Microscope, 
   Plus, 
@@ -985,6 +986,99 @@ export function EndoscopyProcedureModule() {
   const totalRevenue = procedures.reduce((acc, curr) => acc + (curr.totalAmount || 0), 0);
   const completedCount = procedures.filter(p => p.status === 'Procedure Completed' || p.status === 'Discharged').length;
 
+  const handlePrintDailySheet = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    let html = `
+      <html>
+      <head>
+        <title>Endoscopy Daily Register Sheet</title>
+        <style>
+          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 20px; font-size: 12px; }
+          h2 { text-align: center; margin-bottom: 5px; }
+          p.subtitle { text-align: center; margin-top: 0; color: #555; margin-bottom: 20px; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+          th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+          th { background-color: #f3f4f6; font-weight: bold; }
+          .footer { text-align: right; margin-top: 30px; font-size: 11px; }
+          @media print {
+            @page { margin: 10mm; size: landscape; }
+          }
+        </style>
+      </head>
+      <body>
+        <h2>Direct Endoscopy & Colonoscopy Patient Register</h2>
+        <p class="subtitle">Daily Sheet - Printed on ${format(new Date(), 'dd MMM yyyy, hh:mm a')}</p>
+        <table>
+          <thead>
+            <tr>
+              <th>S.No</th>
+              <th>Date/Time</th>
+              <th>Patient Details</th>
+              <th>Procedure Type</th>
+              <th>Referred By</th>
+              <th>Status</th>
+              <th>Gross Amount</th>
+              <th>Discount</th>
+              <th>Net Paid</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    let totalAmount = 0;
+    let totalDiscount = 0;
+    let totalPaid = 0;
+
+    filteredProcedures.forEach((proc, index) => {
+      totalAmount += (proc.procedureFee + proc.sedationFee + proc.biopsyKitFee) || 0;
+      totalDiscount += proc.discountAmount || 0;
+      totalPaid += proc.amountPaid || 0;
+
+      html += `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${format(new Date(proc.scheduledDateTime || new Date()), 'dd-MM-yyyy')}<br/>${format(new Date(proc.scheduledDateTime || new Date()), 'hh:mm a')}</td>
+          <td><b>${proc.patientName}</b><br/>${proc.age}y / ${proc.gender}<br/>Ph: ${proc.patientPhone}</td>
+          <td>${proc.procedureType}</td>
+          <td>${proc.referredByDoctor || 'Self'}</td>
+          <td>${proc.status || 'Scheduled'}</td>
+          <td>Rs. ${((proc.procedureFee || 0) + (proc.sedationFee || 0) + (proc.biopsyKitFee || 0)).toLocaleString('en-IN')}</td>
+          <td>Rs. ${(proc.discountAmount || 0).toLocaleString('en-IN')}</td>
+          <td>Rs. ${(proc.amountPaid || 0).toLocaleString('en-IN')}</td>
+        </tr>
+      `;
+    });
+
+    html += `
+          </tbody>
+          <tfoot>
+            <tr>
+              <th colspan="6" style="text-align: right;">Total Collection:</th>
+              <th>Rs. ${totalAmount.toLocaleString('en-IN')}</th>
+              <th>Rs. ${totalDiscount.toLocaleString('en-IN')}</th>
+              <th>Rs. ${totalPaid.toLocaleString('en-IN')}</th>
+            </tr>
+          </tfoot>
+        </table>
+        <div class="footer">
+          <p>Endoscopy Suite Manager / Authorised Signatory</p>
+        </div>
+        <script>
+          window.onload = () => {
+            window.print();
+            setTimeout(() => window.close(), 500);
+          }
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
   const handleExportEndoscopy = () => {
     try {
       const headers = [
@@ -1092,23 +1186,19 @@ export function EndoscopyProcedureModule() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => {
-                setAdmissionSheetPatient(null);
-                setAdmissionSheetProcedure(null);
-                setIsAdmissionSheetOpen(true);
-              }}
-              className="bg-white/10 hover:bg-white/20 text-white border-white/20 font-bold text-xs gap-1.5 rounded-xl h-10 cursor-pointer"
-              title="Open Official Day-Care Admission Sheet & LAMA / DOR Form (A4)"
-            >
-              <FileText className="w-4 h-4 text-sky-300" /> Admission Sheet & LAMA
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
               onClick={handleExportEndoscopy}
               className="bg-white/10 hover:bg-white/20 text-white border-white/20 font-bold text-xs gap-1.5 rounded-xl h-10 cursor-pointer"
             >
               <Download className="w-4 h-4" /> Export CSV
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handlePrintDailySheet}
+              className="bg-indigo-500 hover:bg-indigo-400 text-white border-transparent font-bold text-xs gap-1.5 rounded-xl h-10 cursor-pointer shadow-sm"
+              title="Print Daily Sheet (A4)"
+            >
+              <FileText className="w-4 h-4" /> Print Daily Sheet
             </Button>
             <Button 
               size="sm" 
@@ -1827,29 +1917,6 @@ export function EndoscopyProcedureModule() {
                             <Button 
                               size="sm" 
                               variant="outline" 
-                              title="Open Day-Care Admission Sheet & LAMA Form (A4)"
-                              onClick={() => {
-                                const matchedPat = patients.find(p => p.id === proc.patientId || (p.mrn && p.mrn === proc.mrn));
-                                setAdmissionSheetPatient(matchedPat || {
-                                  name: proc.patientName,
-                                  phone: proc.patientPhone,
-                                  age: proc.patientAge,
-                                  gender: proc.patientGender,
-                                  address: proc.patientAddress,
-                                  mrn: proc.mrn,
-                                  referredBy: proc.referredBy
-                                });
-                                setAdmissionSheetProcedure(proc);
-                                setIsAdmissionSheetOpen(true);
-                              }}
-                              className="h-8 text-[11px] font-bold border-indigo-200 bg-indigo-50/50 text-indigo-700 hover:bg-indigo-100 gap-1"
-                            >
-                              <FileText className="w-3.5 h-3.5 text-indigo-600" /> Admission Sheet
-                            </Button>
-
-                            <Button 
-                              size="sm" 
-                              variant="outline" 
                               title="View / Print Consent Form"
                               onClick={() => openConsentModal(proc)}
                               className="h-8 text-[11px] font-bold border-slate-200 gap-1 text-slate-700"
@@ -2183,27 +2250,6 @@ export function EndoscopyProcedureModule() {
                         <Printer className="w-3.5 h-3.5" /> Print Consent
                       </Button>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="w-full text-xs font-bold border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 gap-1 h-7"
-                      onClick={() => {
-                        const matchedPat = patients.find(p => p.id === proc.patientId || (p.mrn && p.mrn === proc.mrn));
-                        setAdmissionSheetPatient(matchedPat || {
-                          name: proc.patientName,
-                          phone: proc.patientPhone,
-                          age: proc.patientAge,
-                          gender: proc.patientGender,
-                          address: proc.patientAddress,
-                          mrn: proc.mrn,
-                          referredBy: proc.referredBy
-                        });
-                        setAdmissionSheetProcedure(proc);
-                        setIsAdmissionSheetOpen(true);
-                      }}
-                    >
-                      <FileText className="w-3 h-3 text-indigo-600" /> Admission Sheet & LAMA Form (A4)
-                    </Button>
                   </div>
                 </div>
               ))}

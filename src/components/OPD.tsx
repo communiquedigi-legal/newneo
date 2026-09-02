@@ -66,8 +66,11 @@ import {
   SlidersHorizontal,
   RefreshCw,
   FileDown,
-  ShieldAlert
+  ShieldAlert,
+  Receipt,
+  FilePenLine
 } from 'lucide-react';
+import { numberToWords } from '@/lib/pharmacyInvoicePrint';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
@@ -4267,6 +4270,26 @@ export default function OPD() {
     safePrint(tokenHtml, isA5 ? 600 : is80 ? 450 : 300, isA5 ? 800 : is80 ? 600 : 400);
   };
 
+  const getAppointmentFeeValue = (aptItem: any) => {
+    if (aptItem.fee !== undefined && aptItem.fee !== null && !isNaN(Number(aptItem.fee)) && Number(aptItem.fee) > 0) {
+      return Number(aptItem.fee);
+    }
+    if (aptItem.payable_amount !== undefined && aptItem.payable_amount !== null && !isNaN(Number(aptItem.payable_amount)) && Number(aptItem.payable_amount) > 0) {
+      return Number(aptItem.payable_amount);
+    }
+    if (aptItem.paid_amount !== undefined && aptItem.paid_amount !== null && !isNaN(Number(aptItem.paid_amount)) && Number(aptItem.paid_amount) > 0) {
+      return Number(aptItem.paid_amount);
+    }
+    if (aptItem.amount !== undefined && aptItem.amount !== null && !isNaN(Number(aptItem.amount)) && Number(aptItem.amount) > 0) {
+      return Number(aptItem.amount);
+    }
+    const doc = findDoctor(aptItem.doctor || aptItem.doctorName || aptItem.doctorId || aptItem.doctor_id);
+    if (doc && doc.consultationFee !== undefined && doc.consultationFee !== null && !isNaN(Number(doc.consultationFee))) {
+      return Number(doc.consultationFee);
+    }
+    return (storage.get(STORAGE_KEYS.OPD_CHARGES, { consult: 500 }).consult || 500);
+  };
+
   const printDailyOPDRegister = (targetDate?: string, doctorFilter?: string) => {
     const dateToPrint = targetDate || fromDateFilter || selectedDateFilter || getLocalDateString();
     const docToFilter = doctorFilter || selectedDoctorFilter || 'all';
@@ -4292,7 +4315,11 @@ export default function OPD() {
     const totalBookings = list.length;
     const routineCount = list.filter(a => (a.urgency || 'Routine') === 'Routine').length;
     const urgentCount = list.filter(a => a.urgency === 'Urgent' || a.urgency === 'Emergency').length;
-    const totalFees = list.reduce((sum, a) => sum + Number(a.fee || 0), 0);
+    const totalFees = list.reduce((sum, a) => {
+      const base = getAppointmentFeeValue(a);
+      const discount = Number(a.discount_amount || a.discountAmount || 0);
+      return sum + Math.max(0, base - discount);
+    }, 0);
 
     const hospName = hospitalInfo?.name || 'Gastro Plus Hospital';
     const hospAddr = hospitalInfo?.address || 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh';
@@ -4524,7 +4551,10 @@ export default function OPD() {
                 const tokenNum = opdTokenMap[apt.id] ? `TK-${opdTokenMap[apt.id]}` : `TK-${idx + 1}`;
                 const urgency = apt.urgency || 'Routine';
                 const urgencyClass = urgency === 'Emergency' ? 'badge-emergency' : urgency === 'Urgent' ? 'badge-urgent' : 'badge-routine';
-                const fee = apt.fee !== undefined ? `₹${Number(apt.fee)}` : '-';
+                const baseFee = getAppointmentFeeValue(apt);
+                const discountAmt = Number(apt.discount_amount || apt.discountAmount || 0);
+                const netFee = Math.max(0, baseFee - discountAmt);
+                const isPaid = apt.payment_status === 'Paid';
 
                 return `
                   <tr>
@@ -4536,7 +4566,13 @@ export default function OPD() {
                     <td>${patPhone}</td>
                     <td>${docName}</td>
                     <td><span class="badge ${urgencyClass}">${urgency}</span></td>
-                    <td style="text-align: right; font-weight: 600;">${fee}</td>
+                    <td style="text-align: right; font-weight: 600;">
+                      <div>₹${netFee.toLocaleString('en-IN')}</div>
+                      ${discountAmt > 0 ? `<div style="font-size: 8.5px; color: #c2410c; font-weight: 700;">(Disc -₹${discountAmt})</div>` : ''}
+                      <div style="font-size: 8px; color: ${isPaid ? '#166534' : '#9a3412'}; font-weight: 800; text-transform: uppercase;">
+                        ${isPaid ? 'PAID' : 'PENDING'}
+                      </div>
+                    </td>
                   </tr>
                 `;
               }).join('') : `
@@ -4649,6 +4685,403 @@ export default function OPD() {
     );
 
     safePrint(html, 800, 1000);
+  };
+
+  const printBlankPrescriptionForPatient = (patient: any, doctorNameFallback?: string) => {
+    if (!patient) {
+      toast.error('Patient record not found');
+      return;
+    }
+
+    const docName = doctorNameFallback || patient.attendingDoctor || patient.attending_doctor || (allDoctors[0]?.name || 'Attending Doctor');
+    const docObj = users.find(u => u.name === docName) || allDoctors.find(d => d.name === docName) || allDoctors[0];
+    const latestVitals = selectedPatientVitals && selectedPatientVitals.length > 0 ? selectedPatientVitals[0] : undefined;
+
+    const html = getPrescriptionPrintHtml(
+      {
+        name: patient.name,
+        age: patient.age,
+        gender: patient.gender,
+        mrn: patient.mrn,
+        phone: patient.phone || patient.mobile || '',
+        fatherName: patient.fatherName || patient.father_name || '',
+        allergies: '',
+        pastHistory: '',
+        medicalHistory: '',
+        complaints: ''
+      },
+      {
+        date: getLocalDateString(),
+        medicines: [],
+        advice: '',
+        examinationFindings: '',
+        pastHistory: '',
+        allergies: '',
+        complaints: '',
+        investigationsAdvised: '',
+        diagnosis: '',
+        vitals: latestVitals
+      },
+      docObj,
+      hospitalInfo,
+      undefined,
+      true // isBlank = true!
+    );
+
+    safePrint(html, 800, 1000);
+  };
+
+  const printOPDBill = (patientOrAppointment: any) => {
+    if (!patientOrAppointment) {
+      toast.error('Patient / Appointment details not found');
+      return;
+    }
+
+    // Determine whether passed object is patient or appointment
+    let patient = patients.find(p => 
+      isPatientIdMatch(p.id, patientOrAppointment.id) || 
+      isPatientIdMatch(p.id, patientOrAppointment.patientId) || 
+      isPatientIdMatch(p.id, patientOrAppointment.patient_id) || 
+      (p.mrn && (p.mrn === patientOrAppointment.mrn || p.mrn === patientOrAppointment.patientMrn))
+    );
+
+    let apt = appointments.find(a => 
+      (patient && (isPatientIdMatch(a.patientId, patient.id) || isPatientIdMatch(a.patient_id, patient.id))) ||
+      (a.id === patientOrAppointment.id)
+    );
+
+    if (!patient && patientOrAppointment.name) {
+      patient = patientOrAppointment;
+    } else if (!patient && patientOrAppointment.patientName) {
+      patient = {
+        id: patientOrAppointment.patientId || patientOrAppointment.patient_id || 'N/A',
+        name: patientOrAppointment.patientName,
+        mrn: patientOrAppointment.patientMrn || 'N/A',
+        age: patientOrAppointment.age || '30',
+        gender: patientOrAppointment.gender || 'Male',
+        phone: patientOrAppointment.phone || patientOrAppointment.patientPhone || 'N/A',
+        address: patientOrAppointment.address || 'Local'
+      };
+    }
+
+    if (!apt && patientOrAppointment.fee !== undefined) {
+      apt = patientOrAppointment;
+    }
+
+    const patientName = patient?.name || apt?.patientName || 'Walk-in Patient';
+    const patientMrn = patient?.mrn || apt?.patientMrn || 'N/A';
+    const patientAge = patient?.age || apt?.age || '';
+    const patientGender = patient?.gender || apt?.gender || '';
+    const patientPhone = patient?.phone || patient?.mobile || apt?.patientPhone || '-';
+
+    const docName = apt?.doctor || apt?.doctorName || patient?.attendingDoctor || patient?.attending_doctor || (allDoctors[0]?.name || 'OPD Consultant');
+    const matchedDoc = findDoctor(docName);
+    const docDepartment = matchedDoc?.department || 'General OPD';
+
+    // Get existing bill if available
+    const bills = (storage.get(STORAGE_KEYS.BILLING, []) || []) as any[];
+    const matchedBill = bills.find((b: any) => 
+      (patient && (isPatientIdMatch(b.patientId, patient.id) || isPatientIdMatch(b.patient_id, patient.id))) ||
+      (patientMrn !== 'N/A' && (b.patient_mrn === patientMrn || b.patientMrn === patientMrn)) ||
+      (apt && b.appointment_id === apt.id)
+    );
+
+    const baseFee = Number(
+      apt?.fee || 
+      matchedBill?.total_amount || 
+      matchedDoc?.consultationFee || 
+      (storage.get(STORAGE_KEYS.OPD_CHARGES, { consult: 500 }).consult || 500)
+    );
+
+    const discountAmt = Number(
+      apt?.discount_amount || 
+      apt?.discountAmount || 
+      matchedBill?.discount_amount || 
+      0
+    );
+
+    const netPayable = Math.max(0, baseFee - discountAmt);
+    const isPaid = apt?.payment_status === 'Paid' || matchedBill?.status === 'Paid' || matchedBill?.payment_status === 'Paid';
+    const paidAmt = isPaid ? netPayable : Number(matchedBill?.paid_amount || 0);
+    const balanceDue = Math.max(0, netPayable - paidAmt);
+    const paymentMode = apt?.payment_method || apt?.payment_mode || matchedBill?.payment_method || matchedBill?.payment_mode || 'Cash';
+    const refNo = apt?.transaction_ref || apt?.ref_no || matchedBill?.transaction_ref || '';
+    const billDate = apt?.appointment_date || apt?.date || matchedBill?.date || getLocalDateString();
+    const invoiceNo = matchedBill?.invoice_number || `OPD-REC-${(apt?.id || patient?.id || Date.now().toString()).slice(-6).toUpperCase()}`;
+
+    const hospName = hospitalInfo?.name || 'Gastro Plus Hospital';
+    const hospAddr = hospitalInfo?.address || 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, MP';
+    const hospPhone = hospitalInfo?.phone || '9109102145 / 9109101246';
+    const hospEmail = hospitalInfo?.email || 'gatroplusbhopal@gmail.com';
+    const inWords = numberToWords(netPayable);
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>OPD Receipt - ${invoiceNo}</title>
+          <meta charset="utf-8" />
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 12mm 15mm;
+            }
+            * {
+              box-sizing: border-box;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+              color: #0f172a;
+              background: #ffffff;
+              margin: 0;
+              padding: 0;
+              font-size: 12px;
+              line-height: 1.4;
+            }
+            .bill-box {
+              border: 1.5px solid #0f766e;
+              border-radius: 8px;
+              padding: 18px;
+              max-width: 780px;
+              margin: 0 auto;
+            }
+            .header-bar {
+              border-bottom: 2px solid #0f766e;
+              padding-bottom: 12px;
+              margin-bottom: 14px;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            }
+            .hosp-name {
+              font-size: 22px;
+              font-weight: 800;
+              color: #0f766e;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              margin: 0 0 3px 0;
+            }
+            .hosp-info {
+              font-size: 11px;
+              color: #475569;
+              margin: 0;
+            }
+            .receipt-badge {
+              text-align: right;
+            }
+            .receipt-title {
+              font-size: 15px;
+              font-weight: 800;
+              background: #f0fdfa;
+              color: #0f766e;
+              padding: 5px 12px;
+              border-radius: 6px;
+              border: 1px solid #ccfbf1;
+              display: inline-block;
+              letter-spacing: 0.5px;
+            }
+            .meta-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 12px;
+              background: #f8fafc;
+              border: 1px solid #e2e8f0;
+              border-radius: 6px;
+              padding: 10px 14px;
+              margin-bottom: 16px;
+            }
+            .meta-row {
+              display: flex;
+              margin-bottom: 4px;
+              font-size: 11.5px;
+            }
+            .meta-label {
+              width: 120px;
+              font-weight: 600;
+              color: #64748b;
+            }
+            .meta-val {
+              flex: 1;
+              font-weight: 700;
+              color: #0f172a;
+            }
+            table.bill-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 16px;
+            }
+            table.bill-table th {
+              background: #0f766e;
+              color: #ffffff;
+              font-weight: 700;
+              text-align: left;
+              padding: 8px 10px;
+              font-size: 11px;
+              text-transform: uppercase;
+              border: 1px solid #0d9488;
+            }
+            table.bill-table td {
+              padding: 8px 10px;
+              border: 1px solid #e2e8f0;
+              font-size: 11.5px;
+            }
+            .summary-box {
+              width: 320px;
+              margin-left: auto;
+              background: #f8fafc;
+              border: 1px solid #e2e8f0;
+              border-radius: 6px;
+              padding: 10px 14px;
+              margin-bottom: 16px;
+            }
+            .sum-row {
+              display: flex;
+              justify-content: space-between;
+              padding: 3px 0;
+              font-size: 11.5px;
+            }
+            .sum-total {
+              border-top: 1.5px solid #0f766e;
+              padding-top: 6px;
+              margin-top: 4px;
+              font-weight: 800;
+              font-size: 13px;
+              color: #0f766e;
+            }
+            .words-box {
+              background: #f0fdfa;
+              border: 1px solid #ccfbf1;
+              border-radius: 6px;
+              padding: 8px 12px;
+              font-size: 11px;
+              font-weight: 700;
+              color: #0f766e;
+              margin-bottom: 24px;
+            }
+            .sig-grid {
+              display: flex;
+              justify-content: space-between;
+              margin-top: 40px;
+              padding-top: 10px;
+            }
+            .sig-col {
+              text-align: center;
+              width: 200px;
+              border-top: 1px dashed #94a3b8;
+              padding-top: 6px;
+              font-size: 11px;
+              font-weight: 600;
+              color: #475569;
+            }
+            .footer-txt {
+              text-align: center;
+              font-size: 9.5px;
+              color: #94a3b8;
+              margin-top: 16px;
+            }
+          </style>
+        </head>
+        <body onload="window.print();">
+          <div class="bill-box">
+            <div class="header-bar">
+              <div>
+                <h1 class="hosp-name">${hospName}</h1>
+                <p class="hosp-info">${hospAddr}</p>
+                <p class="hosp-info">Phone: ${hospPhone} | Email: ${hospEmail}</p>
+              </div>
+              <div class="receipt-badge">
+                <div class="receipt-title">OPD PATIENT RECEIPT</div>
+                <div style="font-size: 10px; color: #64748b; margin-top: 4px;">Receipt No: <strong>${invoiceNo}</strong></div>
+                <div style="font-size: 10px; color: #64748b;">Date: <strong>${billDate}</strong></div>
+              </div>
+            </div>
+
+            <div class="meta-grid">
+              <div>
+                <div class="meta-row"><span class="meta-label">Patient Name:</span><span class="meta-val">${patientName}</span></div>
+                <div class="meta-row"><span class="meta-label">MRN / Patient ID:</span><span class="meta-val" style="font-family: monospace;">${patientMrn}</span></div>
+                <div class="meta-row"><span class="meta-label">Age / Gender:</span><span class="meta-val">${patientAge ? `${patientAge} Y` : '-'} / ${patientGender || '-'}</span></div>
+                <div class="meta-row"><span class="meta-label">Contact No:</span><span class="meta-val">${patientPhone}</span></div>
+              </div>
+              <div>
+                <div class="meta-row"><span class="meta-label">Consulting Doctor:</span><span class="meta-val">${docName}</span></div>
+                <div class="meta-row"><span class="meta-label">Department:</span><span class="meta-val">${docDepartment}</span></div>
+                <div class="meta-row"><span class="meta-label">Payment Mode:</span><span class="meta-val">${paymentMode} ${refNo ? `(${refNo})` : ''}</span></div>
+                <div class="meta-row"><span class="meta-label">Payment Status:</span><span class="meta-val" style="color: ${isPaid ? '#166534' : '#c2410c'}; font-weight: 800;">${isPaid ? 'PAID' : 'PENDING'}</span></div>
+              </div>
+            </div>
+
+            <table class="bill-table">
+              <thead>
+                <tr>
+                  <th style="width: 8%; text-align: center;">#</th>
+                  <th style="width: 52%;">Service Description</th>
+                  <th style="width: 12%; text-align: center;">Qty</th>
+                  <th style="width: 14%; text-align: right;">Rate (₹)</th>
+                  <th style="width: 14%; text-align: right;">Amount (₹)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style="text-align: center; font-weight: 700;">1</td>
+                  <td>
+                    <strong>OPD Consultation Fee</strong>
+                    <div style="font-size: 10.5px; color: #64748b;">Doctor: ${docName} (${docDepartment})</div>
+                  </td>
+                  <td style="text-align: center;">1</td>
+                  <td style="text-align: right;">₹${baseFee.toFixed(2)}</td>
+                  <td style="text-align: right; font-weight: 700;">₹${baseFee.toFixed(2)}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div class="summary-box">
+              <div class="sum-row">
+                <span style="color: #64748b;">Subtotal:</span>
+                <strong>₹${baseFee.toFixed(2)}</strong>
+              </div>
+              ${discountAmt > 0 ? `
+                <div class="sum-row" style="color: #c2410c;">
+                  <span>Discount / Rebate:</span>
+                  <strong>- ₹${discountAmt.toFixed(2)}</strong>
+                </div>
+              ` : ''}
+              <div class="sum-row sum-total">
+                <span>Net Payable:</span>
+                <span>₹${netPayable.toFixed(2)}</span>
+              </div>
+              <div class="sum-row" style="color: #166534; font-weight: 700; margin-top: 3px;">
+                <span>Amount Paid:</span>
+                <span>₹${paidAmt.toFixed(2)}</span>
+              </div>
+              ${balanceDue > 0 ? `
+                <div class="sum-row" style="color: #dc2626; font-weight: 700;">
+                  <span>Balance Due:</span>
+                  <span>₹${balanceDue.toFixed(2)}</span>
+                </div>
+              ` : ''}
+            </div>
+
+            <div class="words-box">
+              <strong>Amount in Words:</strong> ${inWords}
+            </div>
+
+            <div class="sig-grid">
+              <div class="sig-col">Patient / Attendant Signature</div>
+              <div class="sig-col">Authorized Cashier / Reception</div>
+            </div>
+
+            <div class="footer-txt">
+              This is a computer-generated Outpatient Consultation receipt from ${hospName}. Thank you for visiting.
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    safePrint(html, 850, 900);
   };
 
   const handleExportData = () => {
@@ -6152,6 +6585,30 @@ export default function OPD() {
                               </Button>
                               <Button 
                                 variant="ghost" 
+                                size="sm" 
+                                className="text-indigo-600 hover:bg-indigo-50 h-8 gap-1.5 whitespace-nowrap font-medium" 
+                                onClick={() => {
+                                  printBlankPrescriptionForPatient(patient);
+                                }}
+                                title="Print Blank Prescription Template (Patient Details, Header & Footer Only)"
+                              >
+                                <FilePenLine className="w-4 h-4" />
+                                Blank Rx
+                              </Button>
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="text-teal-700 hover:bg-teal-50 h-8 gap-1.5 whitespace-nowrap font-medium" 
+                                onClick={() => {
+                                  printOPDBill(patient);
+                                }}
+                                title="Print OPD Consultation / Patient Bill Directly"
+                              >
+                                <Receipt className="w-4 h-4" />
+                                Print Bill
+                              </Button>
+                              <Button 
+                                variant="ghost" 
                                 size="icon" 
                                 className="h-8 w-8 text-slate-600 hover:bg-slate-100" 
                                 onClick={() => {
@@ -6191,6 +6648,8 @@ export default function OPD() {
                                   size="sm" 
                                   className="text-medical-blue h-8 whitespace-nowrap font-bold hover:bg-blue-50" 
                                   onClick={async () => {
+                                    const confirmTransfer = window.confirm(`Are you sure you want to transfer ${patient.name} to IPD Admission?`);
+                                    if (!confirmTransfer) return;
                                     try {
                                       const result = await supabaseService.updatePatient(patient.id, { 
                                         status: 'Admitting', 
@@ -6506,6 +6965,41 @@ export default function OPD() {
                               <FileText className="w-4 h-4 text-emerald-600" />
                             </Button>
                           )}
+                          {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'DOCTOR' || currentUser?.role === 'NURSE' || currentUser?.role === 'RECEPTIONIST' || currentUser?.role === 'RECEPTION' || currentUser?.role === 'FRONT_DESK' || currentUser?.role === 'ACCOUNTANT' || currentUser?.role === 'ACCOUNTS') && (
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="h-8 w-8 text-indigo-600 hover:bg-indigo-50" 
+                              title="Print Blank Prescription Template"
+                              onClick={() => {
+                                const patient = patients.find(p => 
+                                                  isPatientIdMatch(p.id, apt.patientId) || 
+                                                  isPatientIdMatch(p.id, apt.patient_id) ||
+                                                  (p.mrn && p.mrn === apt.patientMrn) ||
+                                                  (p.name && p.name.toLowerCase().trim() === (apt.patientName || '').toLowerCase().trim())
+                                                ) || {
+                                                  id: apt.patientId || apt.patient_id || `temp-${Math.random().toString(36).substring(2, 11)}`,
+                                                  name: apt.patientName || 'Unknown Patient',
+                                                  mrn: apt.patientMrn || 'N/A',
+                                                  age: apt.age || apt.patientAge || '30',
+                                                  gender: apt.gender || apt.patientGender || 'Male',
+                                                  phone: apt.phone || apt.patientPhone || 'N/A'
+                                                };
+                                printBlankPrescriptionForPatient(patient, apt.doctor);
+                              }}
+                            >
+                              <FilePenLine className="w-4 h-4 text-indigo-600" />
+                            </Button>
+                          )}
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8 text-teal-700 hover:bg-teal-50" 
+                            title="Print OPD Consultation Bill / Receipt"
+                            onClick={() => printOPDBill(apt)}
+                          >
+                            <Receipt className="w-4 h-4 text-teal-700" />
+                          </Button>
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => printAppointmentToken(apt)}>
                             <Printer className="w-4 h-4" />
                           </Button>
@@ -8704,18 +9198,50 @@ export default function OPD() {
           </div>
           <DialogFooter className="gap-2 flex-wrap sm:justify-end">
             {selectedPatient && (
-              <Button 
-                variant="outline" 
-                className="gap-2 border-medical-blue text-medical-blue hover:bg-blue-50"
-                onClick={() => {
-                  const pat = selectedPatient;
-                  setIsDetailsOpen(false);
-                  startEditPatient(pat);
-                }}
-              >
-                <Edit className="w-4 h-4" />
-                Edit Patient
-              </Button>
+              <>
+                <Button 
+                  variant="outline" 
+                  className="gap-1.5 border-emerald-600 text-emerald-700 hover:bg-emerald-50"
+                  onClick={() => {
+                    printLatestPrescriptionForPatient(selectedPatient);
+                  }}
+                >
+                  <Printer className="w-4 h-4" />
+                  Print Rx
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="gap-1.5 border-indigo-600 text-indigo-600 hover:bg-indigo-50"
+                  onClick={() => {
+                    printBlankPrescriptionForPatient(selectedPatient);
+                  }}
+                >
+                  <FilePenLine className="w-4 h-4" />
+                  Blank Rx
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="gap-1.5 border-teal-700 text-teal-700 hover:bg-teal-50"
+                  onClick={() => {
+                    printOPDBill(selectedPatient);
+                  }}
+                >
+                  <Receipt className="w-4 h-4" />
+                  Print Bill
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="gap-2 border-medical-blue text-medical-blue hover:bg-blue-50"
+                  onClick={() => {
+                    const pat = selectedPatient;
+                    setIsDetailsOpen(false);
+                    startEditPatient(pat);
+                  }}
+                >
+                  <Edit className="w-4 h-4" />
+                  Edit Patient
+                </Button>
+              </>
             )}
             <Button className="bg-medical-blue" onClick={() => setIsDetailsOpen(false)}>Close</Button>
           </DialogFooter>
