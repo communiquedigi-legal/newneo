@@ -120,6 +120,12 @@ import { canUserEditRecord, canUserEditClinicalData, canUserManageBilling, norma
 import { getPrescriptionPrintHtml } from '@/lib/prescriptionPrint';
 import { triggerRxPrintPreview } from '@/components/RxPrintPreviewModal';
 import { triggerWhatsAppPrescription, WhatsAppPrescriptionPayload } from '@/lib/whatsappService';
+import { AppointmentSlipModal } from './AppointmentSlipModal';
+import { 
+  printAppointmentDirect, 
+  AppointmentSlipData, 
+  AppointmentPrintFormat 
+} from '@/lib/appointmentPrint';
 
 const isPatientIdMatch = (id1: any, id2: any): boolean => {
   if (!id1 || !id2) return false;
@@ -246,8 +252,8 @@ const getLocalDateString = () => {
 };
 
 const safePrint = (htmlContent: string, width = 800, height = 1000) => {
-  // If it is a prescription or large document, show the full Rx Print Preview Modal
-  if (width >= 700 || htmlContent.includes('Prescription') || htmlContent.includes('Rx') || htmlContent.includes('Hospital')) {
+  // Only route actual prescriptions or clinical Rx documents to the Rx Print Preview Modal
+  if (htmlContent.includes('Prescription') || htmlContent.includes('Rx Header') || (width >= 700 && htmlContent.includes('Rx'))) {
     triggerRxPrintPreview(htmlContent);
     return true;
   }
@@ -637,6 +643,10 @@ export default function OPD() {
   const [refundReasonInput, setRefundReasonInput] = useState<string>('Patient consultation cancellation / doctor unavailable');
   const [refundModeInput, setRefundModeInput] = useState<string>('Cash');
   const [isProcessingRefund, setIsProcessingRefund] = useState(false);
+
+  // OPD Appointment Slip Print & Preview Modal States
+  const [selectedAppointmentForSlip, setSelectedAppointmentForSlip] = useState<AppointmentSlipData | null>(null);
+  const [isAppointmentSlipModalOpen, setIsAppointmentSlipModalOpen] = useState(false);
 
   const handleOpenRegisterChange = (open: boolean) => {
     setIsRegisterOpen(open);
@@ -4113,6 +4123,10 @@ export default function OPD() {
   };
 
   const printAppointmentToken = (apt: any) => {
+    handlePrintAppointment(apt);
+  };
+
+  const _legacyPrintTokenHtml = (apt: any) => {
     const patName = patients.find(p => isPatientIdMatch(p.id, apt.patientId) || isPatientIdMatch(p.id, apt.patient_id))?.name || apt.patientName || 'WALK-IN PATIENT';
     const patMRN = patients.find(p => isPatientIdMatch(p.id, apt.patientId) || isPatientIdMatch(p.id, apt.patient_id))?.mrn || apt.patientMrn || 'N/A';
     
@@ -4396,6 +4410,72 @@ export default function OPD() {
       return Number(doc.consultationFee);
     }
     return (storage.get(STORAGE_KEYS.OPD_CHARGES, { consult: 500 }).consult || 500);
+  };
+
+  const buildAppointmentSlipData = (apt: any): AppointmentSlipData => {
+    const resolvedPat = patients.find(p => 
+      (p.name && !['walk-in patient', 'walk-in', 'unknown', ''].includes(p.name.toLowerCase().trim()) && (
+        isPatientIdMatch(p.id, apt.patientId || apt.patient_id) || 
+        (p.mrn && (p.mrn === apt.patientMrn || p.mrn === apt.patient_mrn || p.mrn === apt.patientId || p.mrn === apt.patient_id)) || 
+        (p.name && apt.patientName && p.name.toLowerCase().trim() === String(apt.patientName).toLowerCase().trim())
+      )) || isPatientIdMatch(p.id, apt.patientId || apt.patient_id)
+    );
+
+    const isAptNameValid = apt.patientName && !['walk-in patient', 'walk-in', 'unknown', ''].includes(String(apt.patientName).toLowerCase().trim());
+    const isResolvedNameValid = resolvedPat?.name && !['walk-in patient', 'walk-in', 'unknown', ''].includes(String(resolvedPat.name).toLowerCase().trim());
+    const isJoinedNameValid = apt.patients?.name && !['walk-in patient', 'walk-in', 'unknown', ''].includes(String(apt.patients.name).toLowerCase().trim());
+    const displayName = isAptNameValid ? apt.patientName : (isJoinedNameValid ? apt.patients.name : (isResolvedNameValid ? resolvedPat.name : (apt.patientName || 'Walk-in Patient')));
+
+    const isAptMrnValid = apt.patientMrn && !['n/a', 'none', '', 'null', 'undefined'].includes(String(apt.patientMrn).toLowerCase().trim());
+    const isJoinedMrnValid = apt.patients?.mrn && !['n/a', 'none', '', 'null', 'undefined'].includes(String(apt.patients.mrn).toLowerCase().trim());
+    const isResolvedMrnValid = resolvedPat?.mrn && !['n/a', 'none', '', 'null', 'undefined'].includes(String(resolvedPat.mrn).toLowerCase().trim());
+    const displayMrn = isAptMrnValid ? apt.patientMrn : (isJoinedMrnValid ? apt.patients.mrn : (isResolvedMrnValid ? resolvedPat.mrn : (apt.patientMrn || 'N/A')));
+
+    const patPhone = resolvedPat?.phone || resolvedPat?.mobile || resolvedPat?.contact || apt.phone || (apt as any).patientPhone || '—';
+
+    const docObj = findDoctor(apt.doctor || apt.doctorName || apt.doctor_id);
+    const docDisplay = docObj || (apt.doctor_id ? users.find(u => isPatientIdMatch(u.id, apt.doctor_id)) : null) || apt.doctor || apt.doctorName || 'Dr. Rajesh Sharma';
+
+    const tokenNum = opdTokenMap[apt.id] ? `TK-${opdTokenMap[apt.id]}` : (apt.token_number || apt.tokenNumber || (apt.id ? `TK-${String(apt.id).slice(-3).toUpperCase()}` : 'TK-1'));
+    const appointmentSeq = appointmentSeqMap[apt.id] ? `#${1000 + appointmentSeqMap[apt.id]}` : (apt.appointment_number || `#${String(apt.id || '1001').slice(-4).toUpperCase()}`);
+    const fee = getAppointmentFeeValue(apt);
+    const discount = Number(apt.discount_amount || apt.discountAmount || 0);
+
+    return {
+      appointment: apt,
+      patient: {
+        ...(resolvedPat || {}),
+        name: displayName,
+        mrn: displayMrn,
+        phone: patPhone,
+        age: resolvedPat?.age || apt.age || (apt as any).patientAge || '—',
+        gender: resolvedPat?.gender || apt.gender || (apt as any).patientGender || '—',
+        address: resolvedPat?.address || (resolvedPat?.city ? `${resolvedPat.city}, C.G.` : 'Raipur, C.G.'),
+        guardianName: resolvedPat?.guardianName || resolvedPat?.fatherName || (apt as any).guardianName || ''
+      },
+      doctor: docDisplay,
+      tokenNumber: tokenNum,
+      appointmentNumber: appointmentSeq,
+      consultationFee: fee,
+      discountAmount: discount,
+      netFee: Math.max(0, fee - discount),
+      paymentStatus: apt.payment_status || (Math.max(0, fee - discount) === 0 ? 'Free / Exempted' : 'Paid'),
+      paymentMode: apt.payment_method || apt.paymentMode || 'Cash',
+      bookedBy: currentUser?.name || 'Front Desk Reception'
+    };
+  };
+
+  const handlePrintAppointment = (apt: any, format?: AppointmentPrintFormat) => {
+    const slipData = buildAppointmentSlipData(apt);
+    const chosenFormat = format || (tokenPrintSize === 'thermal_80' ? 'thermal_80' : tokenPrintSize === 'thermal' ? 'thermal_58' : 'A5');
+    printAppointmentDirect(slipData, chosenFormat);
+    toast.success(`Printing OPD Appointment Slip for ${slipData.patient?.name || 'Patient'} (${slipData.tokenNumber})`);
+  };
+
+  const handlePreviewAppointmentSlip = (apt: any) => {
+    const slipData = buildAppointmentSlipData(apt);
+    setSelectedAppointmentForSlip(slipData);
+    setIsAppointmentSlipModalOpen(true);
   };
 
   const printDailyOPDRegister = (targetDate?: string, doctorFilter?: string) => {
@@ -7152,8 +7232,24 @@ export default function OPD() {
                           >
                             <Receipt className="w-4 h-4 text-teal-700" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => printAppointmentToken(apt)}>
-                            <Printer className="w-4 h-4" />
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="h-8 px-2.5 text-xs font-bold text-teal-800 bg-teal-50/90 border-teal-200 hover:bg-teal-100 hover:border-teal-300 gap-1.5 shadow-2xs transition-colors" 
+                            title="Direct Print Official OPD Appointment Slip"
+                            onClick={() => handlePrintAppointment(apt)}
+                          >
+                            <Printer className="w-3.5 h-3.5 text-teal-700" />
+                            <span>Print Slip</span>
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8 text-teal-700 hover:bg-teal-50" 
+                            title="Preview Slip / Change Size (A5/A4/Thermal) / WhatsApp"
+                            onClick={() => handlePreviewAppointmentSlip(apt)}
+                          >
+                            <Eye className="w-4 h-4 text-teal-600" />
                           </Button>
                           {!isAccountant && (
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-medical-blue" onClick={() => startEditAppointment(apt)}>
@@ -10134,6 +10230,18 @@ export default function OPD() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* OPD Appointment Slip Print & Preview Modal */}
+      <AppointmentSlipModal
+        isOpen={isAppointmentSlipModalOpen}
+        onClose={() => {
+          setIsAppointmentSlipModalOpen(false);
+          setSelectedAppointmentForSlip(null);
+        }}
+        data={selectedAppointmentForSlip}
+        hospitalInfo={hospitalInfo}
+        initialFormat={tokenPrintSize === 'thermal_80' ? 'thermal_80' : tokenPrintSize === 'thermal' ? 'thermal_58' : 'A5'}
+      />
     </div>
   );
 }
