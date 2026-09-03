@@ -38,15 +38,19 @@ interface AppointmentSlipModalProps {
   onClose: () => void;
   data: AppointmentSlipData | null;
   defaultFormat?: AppointmentPrintFormat;
+  initialFormat?: AppointmentPrintFormat;
+  hospitalInfo?: any;
 }
 
 export const AppointmentSlipModal: React.FC<AppointmentSlipModalProps> = ({
   isOpen,
   onClose,
   data,
-  defaultFormat = 'A5'
+  defaultFormat = 'A5',
+  initialFormat,
+  hospitalInfo
 }) => {
-  const [format, setFormat] = useState<AppointmentPrintFormat>(defaultFormat);
+  const [format, setFormat] = useState<AppointmentPrintFormat>(initialFormat || defaultFormat);
 
   const details = useMemo(() => {
     if (!data) return null;
@@ -159,13 +163,13 @@ export const AppointmentSlipModal: React.FC<AppointmentSlipModalProps> = ({
             {/* Hospital Title */}
             <div className="text-center pb-3 border-b border-dashed border-slate-300">
               <div className="text-lg font-black text-teal-950 uppercase tracking-wide">
-                NEW GASTRO PLUS HOSPITAL
+                {hospitalInfo?.name || 'NEO GASTRO PLUS HOSPITAL'}
               </div>
               <div className="text-[10.5px] text-slate-500 font-medium">
-                Center for Advanced Gastroenterology, Hepatology & Multispeciality Care
+                {hospitalInfo?.tagline || 'Center for Advanced Gastroenterology, Hepatology & Multispeciality Care'}
               </div>
               <div className="text-[9.5px] text-slate-400 mt-0.5">
-                Opp. New Collectorate, Ring Road No. 1, Raipur (C.G.) • Ph: 0771-4002000
+                {hospitalInfo?.address || 'Opp. New Collectorate, Ring Road No. 1, Raipur (C.G.)'} • Ph: {hospitalInfo?.phone || '0771-4002000'}
               </div>
               <div className="inline-block mt-2 px-2 py-0.5 bg-teal-50 border border-teal-200 text-teal-800 text-[10px] font-black rounded-full uppercase tracking-wider">
                 OPD Consultation Slip

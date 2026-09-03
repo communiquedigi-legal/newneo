@@ -108,12 +108,12 @@ export function formatPrescriptionForWhatsApp(payload: WhatsAppPrescriptionPaylo
   const { patient, prescription, doctor, hospitalInfo, templateType = 'full' } = payload;
 
   const defaultHospital = storage.get(STORAGE_KEYS.HOSPITAL_INFO, {
-    name: 'NEW GASTRO PLUS HOSPITAL',
+    name: 'NEO GASTRO PLUS HOSPITAL',
     address: '123 Healthcare Way, Medical City',
     phone: '+91 98765 43210'
   });
 
-  const hospName = hospitalInfo?.name || defaultHospital.name || 'NEW GASTRO PLUS HOSPITAL';
+  const hospName = hospitalInfo?.name || defaultHospital.name || 'NEO GASTRO PLUS HOSPITAL';
   const hospAddress = hospitalInfo?.address || defaultHospital.address || '';
   const hospPhone = hospitalInfo?.phone || defaultHospital.phone || '';
 

@@ -3617,7 +3617,7 @@ export default function OPD() {
             <div>
               <div class="header">
                 <div class="hospital-logo">🏥</div>
-                <div class="hospital-name">NEW GASTRO PLUS HOSPITAL</div>
+                <div class="hospital-name">NEO GASTRO PLUS HOSPITAL</div>
                 <div class="sub-title">OPD CLINIC APPOINTMENT SLIP</div>
               </div>
               
@@ -3685,7 +3685,7 @@ export default function OPD() {
         </head>
         <body onload="window.print();">
           <div class="header">
-            <div class="bold hospital-name">NEW GASTRO PLUS HOSPITAL</div>
+            <div class="bold hospital-name">NEO GASTRO PLUS HOSPITAL</div>
             <div style="font-size: 11px; margin-top: 4px; font-weight: bold;">OPD CONSULTATION TOKEN</div>
           </div>
           
@@ -3735,7 +3735,7 @@ export default function OPD() {
         </head>
         <body onload="window.print();">
           <div class="header">
-            <div class="bold" style="font-size: 14px;">NEW GASTRO PLUS HOSPITAL</div>
+            <div class="bold" style="font-size: 14px;">NEO GASTRO PLUS HOSPITAL</div>
             <div>OPD TOKEN</div>
           </div>
           
@@ -4257,7 +4257,7 @@ export default function OPD() {
             <div>
               <div class="header">
                 <div class="hospital-logo">🏥</div>
-                <div class="hospital-name">NEW GASTRO PLUS HOSPITAL</div>
+                <div class="hospital-name">NEO GASTRO PLUS HOSPITAL</div>
                 <div class="sub-title">OPD CLINIC APPOINTMENT SLIP</div>
               </div>
               
@@ -4328,7 +4328,7 @@ export default function OPD() {
         </head>
         <body onload="window.print();">
           <div class="header">
-            <div class="hospital-name">NEW GASTRO PLUS HOSPITAL</div>
+            <div class="hospital-name">NEO GASTRO PLUS HOSPITAL</div>
             <div style="font-size: 11px; margin-top: 4px; font-weight: bold;">OPD CLINIC APPOINTMENT SLIP</div>
           </div>
           <div>
@@ -4367,7 +4367,7 @@ export default function OPD() {
         </head>
         <body onload="window.print();">
           <div class="header">
-            <div class="hospital-name">NEW GASTRO PLUS HOSPITAL</div>
+            <div class="hospital-name">NEO GASTRO PLUS HOSPITAL</div>
             <div style="font-size: 9px; font-weight: bold; margin-top: 2px; color: #444;">OPD CLINIC APPOINTMENT SLIP</div>
           </div>
           <div>

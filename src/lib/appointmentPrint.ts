@@ -18,13 +18,13 @@ export interface AppointmentSlipData {
 export type AppointmentPrintFormat = 'A5' | 'A4' | 'thermal_80' | 'thermal_58';
 
 export const HOSPITAL_CONFIG = {
-  name: 'NEW GASTRO PLUS HOSPITAL',
+  name: 'NEO GASTRO PLUS HOSPITAL',
   tagline: 'Center for Advanced Gastroenterology, Hepatology & Multispeciality Care',
   address: 'Opp. New Collectorate, Ring Road No. 1, Raipur (C.G.) - 492001',
   phone: '0771-4002000, +91 9109102145',
   emergency: '24x7 Emergency & Trauma: 0771-4002001',
-  email: 'opd@newgastroplus.com',
-  website: 'www.newgastroplus.com',
+  email: 'opd@neogastroplus.com',
+  website: 'www.neogastroplus.com',
   nabh: 'NABH ACCREDITED HEALTHCARE PROVIDER'
 };
 

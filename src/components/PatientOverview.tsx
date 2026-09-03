@@ -658,7 +658,7 @@ export default function PatientOverview({ userRole }: { userRole?: string }) {
     }
 
     const hospitalInfo = storage.get<{ name: string; address: string; phone: string }>(STORAGE_KEYS.HOSPITAL_INFO, {
-      name: 'NEW GASTRO PLUS HOSPITAL',
+      name: 'NEO GASTRO PLUS HOSPITAL',
       address: '123 Healthcare Way, Medical City',
       phone: '+91 98765 43210'
     });
@@ -690,7 +690,7 @@ export default function PatientOverview({ userRole }: { userRole?: string }) {
     }
 
     const hospitalInfo = storage.get<{ name: string; address: string; phone: string }>(STORAGE_KEYS.HOSPITAL_INFO, {
-      name: 'NEW GASTRO PLUS HOSPITAL',
+      name: 'NEO GASTRO PLUS HOSPITAL',
       address: '123 Healthcare Way, Medical City',
       phone: '+91 98765 43210'
     });
@@ -722,7 +722,7 @@ export default function PatientOverview({ userRole }: { userRole?: string }) {
     }
 
     const hospitalInfo = storage.get<{ name: string; address: string; phone: string }>(STORAGE_KEYS.HOSPITAL_INFO, {
-      name: 'NEW GASTRO PLUS HOSPITAL',
+      name: 'NEO GASTRO PLUS HOSPITAL',
       address: '123 Healthcare Way, Medical City',
       phone: '+91 98765 43210'
     });
@@ -757,7 +757,7 @@ export default function PatientOverview({ userRole }: { userRole?: string }) {
     }
 
     const hospitalInfo = storage.get<{ name: string; address: string; phone: string }>(STORAGE_KEYS.HOSPITAL_INFO, {
-      name: 'NEW GASTRO PLUS HOSPITAL',
+      name: 'NEO GASTRO PLUS HOSPITAL',
       address: '123 Healthcare Way, Medical City',
       phone: '+91 98765 43210'
     });
@@ -876,7 +876,7 @@ View full details at: ${shareUrl}
     }
     
     const hospitalInfo = storage.get<{ name: string; address: string; phone: string }>(STORAGE_KEYS.HOSPITAL_INFO, {
-      name: 'NEW GASTRO PLUS HOSPITAL',
+      name: 'NEO GASTRO PLUS HOSPITAL',
       address: '123 Healthcare Way, Medical City',
       phone: '+91 98765 43210'
     });
@@ -3373,7 +3373,7 @@ View full details at: ${shareUrl}
                     {reportType === 'pathology' ? 'Pathology Laboratory Report' : 'Radiology Diagnostic Report'}
                   </h3>
                   <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider mt-1">
-                    NEW GASTRO PLUS HOSPITAL LABORATORY & DIAGNOSTICS
+                    NEO GASTRO PLUS HOSPITAL LABORATORY & DIAGNOSTICS
                   </p>
                 </div>
                 <Badge className={`text-xs uppercase font-bold border ${getTestPaymentDetails(reportType === 'pathology' ? (selectedReport.test || '') : (selectedReport.test_name || '')).color}`}>
