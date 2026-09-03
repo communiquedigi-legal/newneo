@@ -184,20 +184,20 @@ const OT_TAB_ITEMS: OTTabItem[] = [
   },
   {
     id: 'carewell-preop-orders',
-    label: 'GastroPlus Pre-Op Orders',
-    shortLabel: 'GastroPlus Pre-Op',
+    label: 'NEO GASTRO PLUS Pre-Op Orders',
+    shortLabel: 'NEO GASTRO PLUS Pre-Op',
     category: 'specialty',
-    categoryName: 'GastroPlus Specialty',
+    categoryName: 'NEO GASTRO PLUS Specialty',
     icon: FileCheck,
     badge: 'Specialty Pre-Op',
     badgeColor: 'bg-teal-100 text-teal-900 border-teal-300'
   },
   {
     id: 'carewell-ot-summary',
-    label: 'GastroPlus OT Summary',
-    shortLabel: 'GastroPlus Summary',
+    label: 'NEO GASTRO PLUS OT Summary',
+    shortLabel: 'NEO GASTRO PLUS Summary',
     category: 'specialty',
-    categoryName: 'GastroPlus Specialty',
+    categoryName: 'NEO GASTRO PLUS Specialty',
     icon: FileText,
     badge: 'Specialty Summary',
     badgeColor: 'bg-teal-100 text-teal-900 border-teal-300'
@@ -704,7 +704,7 @@ export default function OTManagement() {
               Operation Theatre Management
             </h1>
             <p className="text-emerald-100/90 text-xs sm:text-sm max-w-xl font-medium leading-relaxed">
-              Real-time OT Monitoring, Surgical Records, GastroPlus Specialty Notes & Clinical Requisitions
+              Real-time OT Monitoring, Surgical Records, NEO GASTRO PLUS Specialty Notes & Clinical Requisitions
             </p>
 
             {/* Quick Metrics Cards */}
@@ -1034,7 +1034,7 @@ export default function OTManagement() {
                 }`}
               >
                 <FileText className="w-3.5 h-3.5" />
-                GastroPlus Specialty ({OT_TAB_ITEMS.filter(t => t.category === 'specialty').length})
+                NEO GASTRO PLUS Specialty ({OT_TAB_ITEMS.filter(t => t.category === 'specialty').length})
               </button>
               <button
                 type="button"

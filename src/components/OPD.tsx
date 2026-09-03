@@ -4519,7 +4519,7 @@ export default function OPD() {
       return sum + Math.max(0, base - discount);
     }, 0);
 
-    const hospName = hospitalInfo?.name || 'Gastro Plus Hospital';
+    const hospName = hospitalInfo?.name || 'NEO GASTRO PLUS HOSPITAL';
     const hospAddr = hospitalInfo?.address || 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh';
     const hospPhone = hospitalInfo?.phone || '9109102145/9109101246';
     const hospEmail = hospitalInfo?.email || 'gatroplusbhopal@gmail.com';
@@ -4823,19 +4823,20 @@ export default function OPD() {
       })
       .sort((a, b) => new Date(b.date || b.prescription_date || 0).getTime() - new Date(a.date || a.prescription_date || 0).getTime());
 
+    const hasExistingRx = Boolean(patientPrescriptions[0]);
     let latestRx = patientPrescriptions[0];
     if (!latestRx) {
       latestRx = {
         date: getLocalDateString(),
         medicines: [],
         advice: '',
-        doctor: doctorNameFallback || 'Attending Doctor',
+        doctor: doctorNameFallback || patient.attendingDoctor || patient.attending_doctor || (allDoctors[0]?.name || 'Attending Doctor'),
         vitals: undefined
       };
-      toast.info('No existing prescription found; printing empty prescription pad for patient.');
+      toast.info('No recorded prescription found. Opening prescription pad with ruled medication slots.');
     }
 
-    const docObj = users.find(u => u.name === (latestRx.doctor || latestRx.doctor_name || doctorNameFallback));
+    const docObj = users.find(u => u.name === (latestRx.doctor || latestRx.doctor_name || doctorNameFallback)) || allDoctors.find(d => d.name === (latestRx.doctor || latestRx.doctor_name || doctorNameFallback)) || allDoctors[0];
     const latestVitals = selectedPatientVitals && selectedPatientVitals.length > 0 ? selectedPatientVitals[0] : undefined;
 
     const unpacked = deserializePrescriptionAdvice(latestRx.advice || latestRx.notes || '');
@@ -4879,7 +4880,9 @@ export default function OPD() {
         admitWardType: unpacked.admitWardType || latestRx.admitWardType || ''
       },
       docObj,
-      hospitalInfo
+      hospitalInfo,
+      undefined,
+      !hasExistingRx // If no existing rx, generate ruled blank slots rather than empty section
     );
 
     safePrint(html, 800, 1000);
@@ -5007,7 +5010,7 @@ export default function OPD() {
     const billDate = apt?.appointment_date || apt?.date || matchedBill?.date || getLocalDateString();
     const invoiceNo = matchedBill?.invoice_number || `OPD-REC-${(apt?.id || patient?.id || Date.now().toString()).slice(-6).toUpperCase()}`;
 
-    const hospName = hospitalInfo?.name || 'Gastro Plus Hospital';
+    const hospName = hospitalInfo?.name || 'NEO GASTRO PLUS HOSPITAL';
     const hospAddr = hospitalInfo?.address || 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, MP';
     const hospPhone = hospitalInfo?.phone || '9109102145 / 9109101246';
     const hospEmail = hospitalInfo?.email || 'gatroplusbhopal@gmail.com';

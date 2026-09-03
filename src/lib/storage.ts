@@ -83,17 +83,17 @@ function sanitizeStorageValue(key: string, val: any): any {
   if (key === 'hms_hospital_info' && typeof val === 'object') {
     const isOldAddress = !val.address || val.address.includes('Aura Inn') || val.address.includes('Basti') || val.address.includes('Central City') || val.address.includes('Medical District');
     const isOldPhone = !val.phone || val.phone.includes('8601561055') || val.phone.includes('555') || val.phone.includes('2345 6789');
-    const isOldEmail = !val.email || val.email.includes('neogastro') || val.email.includes('cureline') || val.email.includes('medicare');
-    const isOldName = !val.name || val.name.includes('CureLine') || val.name.includes('Medicare') || val.name.toUpperCase().includes('NEO GASTRO');
+    const isOldEmail = !val.email || val.email.includes('cureline') || val.email.includes('medicare');
+    const isOldName = !val.name || val.name.includes('CureLine') || val.name.includes('Medicare') || (val.name.toLowerCase().includes('gastro plus') && !val.name.toUpperCase().includes('NEO GASTRO PLUS'));
 
     if (isOldAddress || isOldPhone || isOldEmail || isOldName) {
       return {
         ...val,
-        name: 'Gastro Plus Hospital',
+        name: 'NEO GASTRO PLUS HOSPITAL',
         address: isOldAddress ? 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh' : val.address,
         phone: isOldPhone ? '9109102145/9109101246' : val.phone,
         email: isOldEmail ? 'gatroplusbhopal@gmail.com' : val.email,
-        website: (val.website && !val.website.includes('neogastro') && !val.website.includes('medicare')) ? val.website : 'www.gastroplusbhopal.com'
+        website: (val.website && !val.website.includes('medicare')) ? val.website : 'www.gastroplusbhopal.com'
       };
     }
   }

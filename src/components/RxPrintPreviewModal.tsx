@@ -54,21 +54,32 @@ export const RxPrintPreviewModal: React.FC = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [viewFitMode, setViewFitMode] = useState<'fit-width' | 'actual' | 'fit-page'>('actual');
+  const [isLoading, setIsLoading] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleOpenPreview = (e: any) => {
-      if (e.detail?.html) {
-        setHtmlContent(e.detail.html);
-        if (e.detail.payload) {
-          setPrescriptionPayload(e.detail.payload);
-        } else {
-          setPrescriptionPayload(null);
-        }
+      let html = '';
+      let payload: WhatsAppPrescriptionPayload | null = null;
+      if (typeof e.detail === 'string') {
+        html = e.detail;
+      } else if (e.detail && typeof e.detail === 'object') {
+        html = e.detail.html || e.detail.content || '';
+        payload = e.detail.payload || null;
+      }
+
+      if (html) {
+        setHtmlContent(html);
+        setPrescriptionPayload(payload);
+        setIsLoading(true);
         setIsOpen(true);
         setZoomLevel(100);
         setViewFitMode('actual');
+        // Failsafe so loading spinner never gets stuck
+        setTimeout(() => {
+          setIsLoading(false);
+        }, 400);
       }
     };
 
@@ -126,33 +137,37 @@ export const RxPrintPreviewModal: React.FC = () => {
       <style id="rx-preview-override">
         .no-print { display: none !important; }
         html, body {
-          background-color: #0f172a !important;
+          background-color: #f1f5f9 !important;
+          color: #0f172a !important;
           margin: 0 !important;
-          padding: 24px 12px !important;
+          padding: 20px 10px !important;
           display: flex !important;
           flex-direction: column !important;
           align-items: center !important;
           min-height: 100vh !important;
           box-sizing: border-box !important;
         }
-        .page-container, .print-container, .prescription-container {
+        .page-container, .print-container, .prescription-container, .print-content {
           margin: 0 auto !important;
           box-sizing: border-box !important;
-          box-shadow: 0 12px 40px rgba(0,0,0,0.35) !important;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.15) !important;
           background: #ffffff !important;
-          border-radius: 8px !important;
-          overflow: hidden !important;
+          color: #0f172a !important;
+          border-radius: 6px !important;
+          width: 100% !important;
+          max-width: 210mm !important;
+          overflow: visible !important;
           transition: all 0.2s ease !important;
         }
         @media screen and (max-width: 860px) {
           html, body {
             padding: 8px 4px !important;
           }
-          .page-container, .print-container, .prescription-container {
+          .page-container, .print-container, .prescription-container, .print-content {
             width: 100% !important;
             max-width: 100% !important;
-            padding: 14px 12px !important;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.2) !important;
+            padding: 12px 10px !important;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.1) !important;
           }
         }
         @media print {
@@ -166,7 +181,7 @@ export const RxPrintPreviewModal: React.FC = () => {
             print-color-adjust: exact !important;
             color-adjust: exact !important;
           }
-          .page-container, .print-container, .prescription-container {
+          .page-container, .print-container, .prescription-container, .print-content {
             box-shadow: none !important;
             border-radius: 0 !important;
             border: none !important;
@@ -229,6 +244,26 @@ export const RxPrintPreviewModal: React.FC = () => {
     return processed;
   }, [htmlContent]);
 
+  // Create safe, high-performance Blob URL for reliable iframe preview
+  const blobUrl = useMemo(() => {
+    if (!cleanHtml) return '';
+    try {
+      const blob = new Blob([cleanHtml], { type: 'text/html;charset=utf-8' });
+      return URL.createObjectURL(blob);
+    } catch (e) {
+      console.error('Blob URL creation error:', e);
+      return '';
+    }
+  }, [cleanHtml]);
+
+  useEffect(() => {
+    return () => {
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+      }
+    };
+  }, [blobUrl]);
+
   // Attach direct DOM event handlers to buttons inside the iframe for guaranteed response
   const attachIframeEvents = useCallback(() => {
     try {
@@ -265,19 +300,7 @@ export const RxPrintPreviewModal: React.FC = () => {
   }, [isFullscreen]);
 
   useEffect(() => {
-    if (isOpen && cleanHtml && iframeRef.current) {
-      const doc = iframeRef.current.contentDocument || iframeRef.current.contentWindow?.document;
-      if (doc) {
-        try {
-          doc.open();
-          doc.write(cleanHtml);
-          doc.close();
-          attachIframeEvents();
-        } catch (e) {
-          console.error('Error writing cleanHtml into iframe:', e);
-        }
-      }
-
+    if (isOpen) {
       const timer = setTimeout(() => {
         attachIframeEvents();
         try {
@@ -287,11 +310,11 @@ export const RxPrintPreviewModal: React.FC = () => {
         } catch (err) {
           // ignore
         }
-      }, 400);
+      }, 300);
 
       return () => clearTimeout(timer);
     }
-  }, [isOpen, cleanHtml, attachIframeEvents]);
+  }, [isOpen, attachIframeEvents]);
 
   const handlePrint = () => {
     try {
@@ -579,25 +602,31 @@ export const RxPrintPreviewModal: React.FC = () => {
               minHeight: zoomLevel > 100 ? `${zoomLevel}%` : '100%'
             }}
           >
-            <iframe 
-              ref={iframeRef}
-              srcDoc={cleanHtml}
-              title="Prescription Print Preview"
-              className="w-full h-full min-h-[82vh] bg-white rounded-xl shadow-2xl border border-slate-700 max-w-5xl"
-              onLoad={() => {
-                try {
-                  const doc = iframeRef.current?.contentDocument || iframeRef.current?.contentWindow?.document;
-                  if (doc && (!doc.body || !doc.body.innerHTML || doc.body.innerHTML.trim() === '')) {
-                    doc.open();
-                    doc.write(cleanHtml);
-                    doc.close();
-                  }
+            {isLoading && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950/60 backdrop-blur-xs text-white gap-3 rounded-xl">
+                <div className="w-8 h-8 border-2 border-teal-400 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-xs font-medium text-slate-300">Loading prescription preview...</span>
+              </div>
+            )}
+
+            {cleanHtml ? (
+              <iframe 
+                ref={iframeRef}
+                srcDoc={cleanHtml}
+                title="Prescription Print Preview"
+                className="w-full h-full min-h-[82vh] bg-white rounded-xl shadow-2xl border border-slate-700 max-w-5xl"
+                onLoad={() => {
+                  setIsLoading(false);
                   attachIframeEvents();
-                } catch (e) {
-                  console.log('iframe onLoad sync error:', e);
-                }
-              }}
-            />
+                }}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center p-12 text-slate-400 min-h-[50vh]">
+                <FileText className="w-12 h-12 text-slate-600 mb-3" />
+                <p className="text-sm font-semibold text-slate-300">No prescription content available to preview</p>
+                <p className="text-xs text-slate-500 mt-1">Select or generate a prescription to view and print.</p>
+              </div>
+            )}
           </div>
 
           {/* Sleek Floating Dock Controls at Bottom Center for Easy Access */}

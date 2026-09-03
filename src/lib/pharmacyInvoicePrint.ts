@@ -16,7 +16,7 @@ export interface PharmacySettings {
 
 export const DEFAULT_PHARMACY_SETTINGS: PharmacySettings = {
   logoUrl: '',
-  pharmacyName: 'Gastro Plus Hospital Pharmacy',
+  pharmacyName: 'NEO GASTRO PLUS HOSPITAL PHARMACY',
   address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
   phone: '9109102145/9109101246',
   tagline: 'A single stop for all your Healthcare needs!',

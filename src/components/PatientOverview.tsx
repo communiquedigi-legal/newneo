@@ -910,7 +910,9 @@ View full details at: ${shareUrl}
         vitals: prescriptionVitals
       },
       doctor,
-      hospitalInfo
+      hospitalInfo,
+      undefined,
+      !prescriptionData
     );
 
     triggerRxPrintPreview(html);

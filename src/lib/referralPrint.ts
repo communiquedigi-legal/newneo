@@ -411,7 +411,7 @@ export function getReferralSlipHtml(data: ReferralCasePrintData, hospitalInfo?: 
       <div class="sig-box">
         <div class="sig-line"></div>
         <div class="sig-label">Admission Desk / Coordinator</div>
-        <div class="sig-sub">Gastro Plus Hospital</div>
+        <div class="sig-sub">NEO GASTRO PLUS HOSPITAL</div>
       </div>
       <div class="sig-box">
         <div class="sig-line"></div>

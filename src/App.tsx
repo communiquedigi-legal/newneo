@@ -1002,8 +1002,11 @@ export default function App() {
       let changed = false;
       let name = saved.name;
       let address = saved.address;
-      if (name && /\bNEW\b/i.test(name)) {
-        name = name.replace(/\bNEW\b/gi, 'NEO');
+      if (name && (/\bNEW\b/i.test(name) || (name.toLowerCase().includes('gastro plus') && !name.toUpperCase().includes('NEO GASTRO PLUS')))) {
+        name = name.replace(/\bNEW\b/gi, 'NEO').replace(/gastro\s*plus/gi, 'NEO GASTRO PLUS');
+        if (!name.toUpperCase().includes('HOSPITAL')) {
+          name += ' HOSPITAL';
+        }
         changed = true;
       }
       if (address && /\bNEW\b/i.test(address)) {
@@ -1018,7 +1021,7 @@ export default function App() {
       return saved;
     }
     return {
-      name: 'NEO Gastro Plus Hospital',
+      name: 'NEO GASTRO PLUS HOSPITAL',
       address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
       gst: '23AAAAA0000A1Z5',
       phone: '9109102145/9109101246',
@@ -1412,7 +1415,7 @@ function AppLayout({ user, hospitalInfo, handleLogout, isMobileMenuOpen, setIsMo
         <ApkDownloadModal
           isOpen={isApkModalOpen}
           onClose={() => setIsApkModalOpen(false)}
-          hospitalName={hospitalInfo?.name || 'Neo GastroPlus Hospital'}
+          hospitalName={hospitalInfo?.name || 'NEO GASTRO PLUS HOSPITAL'}
         />
         <ReportProblemModal
           isOpen={isReportProblemOpen}

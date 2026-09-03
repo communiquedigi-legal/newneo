@@ -35,9 +35,9 @@ export default function Login({ onLogin }: LoginProps) {
   const [isCredentialsModalOpen, setIsCredentialsModalOpen] = useState(false);
   
   const [hospitalInfo] = useState(() => storage.get(STORAGE_KEYS.HOSPITAL_INFO, {
-    name: 'Neo Gastroplus Hospital',
+    name: 'NEO GASTRO PLUS HOSPITAL',
     logo: null
-  }) || { name: 'Neo Gastroplus Hospital', logo: null });
+  }) || { name: 'NEO GASTRO PLUS HOSPITAL', logo: null });
 
   useEffect(() => {
     // Automatically pre-fetch latest staff profiles when the login screen mounts
@@ -338,7 +338,7 @@ export default function Login({ onLogin }: LoginProps) {
               </form>
 
               <p className="mt-8 text-center text-[10px] text-slate-400 font-medium leading-relaxed">
-                © {new Date().getFullYear()} {hospitalInfo?.name || 'Neo GastroPlus Hospital'}. All Rights Reserved.<br />
+                © {new Date().getFullYear()} {hospitalInfo?.name || 'NEO GASTRO PLUS HOSPITAL'}. All Rights Reserved.<br />
                 System Powered by Digital Communique Private Limited
               </p>
             </div>
@@ -350,7 +350,7 @@ export default function Login({ onLogin }: LoginProps) {
       <ApkDownloadModal
         isOpen={isApkModalOpen}
         onClose={() => setIsApkModalOpen(false)}
-        hospitalName={hospitalInfo?.name || 'Neo GastroPlus Hospital'}
+        hospitalName={hospitalInfo?.name || 'NEO GASTRO PLUS HOSPITAL'}
       />
 
       {/* Staff Login Credentials Helper Dialog */}

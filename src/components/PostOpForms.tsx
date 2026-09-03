@@ -316,7 +316,7 @@ export default function PostOpForms({ patient, record, onClose, defaultFormTab =
         </head>
         <body>
           <div style="text-align:center; border-bottom: 2px solid #000; padding-bottom: 6px; margin-bottom: 6px;">
-            <div style="font-size: 18px; font-weight: bold; color: #000;">Gastro Plus Hospital</div>
+            <div style="font-size: 18px; font-weight: bold; color: #000;">NEO GASTRO PLUS HOSPITAL</div>
             <div style="font-size: 10px; margin-top:2px; font-weight: bold;">Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh | Tel: 9109102145/9109101246</div>
           </div>
 
@@ -412,7 +412,7 @@ export default function PostOpForms({ patient, record, onClose, defaultFormTab =
         </head>
         <body>
           <div class="header-box">
-            <div style="font-size: 18px; font-weight: bold;">Gastro Plus Hospital</div>
+            <div style="font-size: 18px; font-weight: bold;">NEO GASTRO PLUS HOSPITAL</div>
             <div style="font-size: 10px; color:#333; font-weight: bold;">Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh | Tel: 9109102145/9109101246</div>
           </div>
 
@@ -649,7 +649,7 @@ export default function PostOpForms({ patient, record, onClose, defaultFormTab =
                   </CardDescription>
                 </div>
                 <div className="text-right text-xs text-slate-300 space-y-0.5">
-                  <p className="font-bold text-white">GastroPlus Hospital</p>
+                  <p className="font-bold text-white">NEO GASTRO PLUS HOSPITAL</p>
                   <p className="text-[11px] text-slate-400">Reg No: {checklist.regNo}</p>
                 </div>
               </div>

@@ -3732,7 +3732,7 @@ const rawSupabaseService = {
   getHospitalInfo: async () => {
     const cached = storage.get(STORAGE_KEYS.HOSPITAL_INFO, null);
     const defaultInfo = {
-      name: 'Gastro Plus Hospital',
+      name: 'NEO GASTRO PLUS HOSPITAL',
       address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
       phone: '9109102145/9109101246',
       email: 'gatroplusbhopal@gmail.com',
@@ -3763,16 +3763,16 @@ const rawSupabaseService = {
         
         const isOldAddress = !data.address || data.address.includes('Aura Inn') || data.address.includes('Basti') || data.address.includes('Central City') || data.address.includes('Medical District') || data.address.includes('123 Health Ave');
         const isOldPhone = !data.phone || data.phone.includes('8601561055') || data.phone.includes('555') || data.phone.includes('2345 6789');
-        const isOldEmail = !data.email || data.email.includes('neogastro') || data.email.includes('cureline') || data.email.includes('medicare');
-        const isOldName = !data.name || data.name.includes('CureLine') || data.name.includes('Medicare') || data.name.toUpperCase().includes('NEO GASTRO');
+        const isOldEmail = !data.email || data.email.includes('cureline') || data.email.includes('medicare');
+        const isOldName = !data.name || data.name.includes('CureLine') || data.name.includes('Medicare') || (data.name.toLowerCase().includes('gastro plus') && !data.name.toUpperCase().includes('NEO GASTRO PLUS'));
 
         const formatted = {
           ...data,
-          name: isOldName ? 'Gastro Plus Hospital' : (data.name || 'Gastro Plus Hospital'),
+          name: isOldName ? 'NEO GASTRO PLUS HOSPITAL' : (data.name ? data.name.replace(/gastro\s*plus/gi, 'NEO GASTRO PLUS') : 'NEO GASTRO PLUS HOSPITAL'),
           address: isOldAddress ? 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh' : data.address,
           phone: isOldPhone ? '9109102145/9109101246' : data.phone,
           email: isOldEmail ? 'gatroplusbhopal@gmail.com' : data.email,
-          website: (data.website && !data.website.includes('neogastro') && !data.website.includes('medicare')) ? data.website : 'www.gastroplusbhopal.com',
+          website: (data.website && !data.website.includes('medicare')) ? data.website : 'www.gastroplusbhopal.com',
           gst: data.tax_id || data.gst || '23AAAAA0000A1Z5',
           logo: validLogo,
           template_image: data.registration_number || null

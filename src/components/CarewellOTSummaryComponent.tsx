@@ -333,7 +333,7 @@ export default function CarewellOTSummaryComponent({
         </head>
         <body>
           <div class="header-box">
-            <div class="h-title">GASTRO PLUS HOSPITAL</div>
+            <div class="h-title">NEO GASTRO PLUS HOSPITAL</div>
             <div class="sub-title">Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh | Ph.: 9109102145/9109101246</div>
           </div>
 
@@ -456,7 +456,7 @@ export default function CarewellOTSummaryComponent({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="font-extrabold text-base tracking-wide uppercase">
-                Neo Gastroplus Hospital
+                NEO GASTRO PLUS HOSPITAL
               </h2>
               <Badge className="bg-blue-500/30 text-blue-200 border-blue-400/30 text-[10px] font-bold">
                 OT SUMMARY & OPERATIVE NOTES FORM
@@ -527,7 +527,7 @@ export default function CarewellOTSummaryComponent({
               <div className="flex flex-col items-center justify-center text-center pb-3 border-b-2 border-slate-800">
                 <div className="flex items-center gap-2 text-slate-900 font-black text-xl tracking-tight">
                   <Building className="w-6 h-6 text-blue-800" />
-                  <span>GASTRO PLUS HOSPITAL</span>
+                  <span>NEO GASTRO PLUS HOSPITAL</span>
                 </div>
                 <p className="text-xs text-slate-700 font-semibold mt-0.5">
                   Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh | Ph.: 9109102145/9109101246
@@ -1044,9 +1044,9 @@ export default function CarewellOTSummaryComponent({
             {/* Printable Header */}
             <div className="text-center border-b-2 border-black pb-3 space-y-1">
               <div className="flex items-center justify-center">
-                <span className="text-[10px] font-bold uppercase tracking-wider">GASTRO PLUS HOSPITAL</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider">NEO GASTRO PLUS HOSPITAL</span>
               </div>
-              <h1 className="text-xl font-bold uppercase tracking-tight">GASTRO PLUS HOSPITAL</h1>
+              <h1 className="text-xl font-bold uppercase tracking-tight">NEO GASTRO PLUS HOSPITAL</h1>
               <p className="text-[10px] italic">Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh | Ph.: 9109102145/9109101246</p>
             </div>
 

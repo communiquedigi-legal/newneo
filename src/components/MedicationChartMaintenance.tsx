@@ -585,14 +585,14 @@ export default function MedicationChartMaintenance({ patientId: propPatientId, p
   // Print Daily 24-Hour Treatment Sheet & MAR Report
   const printDailyTreatmentSheet = () => {
     const hospInfo = storage.get(STORAGE_KEYS.HOSPITAL_INFO, {
-      name: 'Gastro Plus Hospital',
+      name: 'NEO GASTRO PLUS HOSPITAL',
       address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
       phone: '9109102145/9109101246',
       email: 'gatroplusbhopal@gmail.com',
       logo: null as string | null
     });
 
-    const hospName = hospInfo?.name || 'Gastro Plus Hospital';
+    const hospName = hospInfo?.name || 'NEO GASTRO PLUS HOSPITAL';
     const hospAddr = hospInfo?.address || 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh';
     const hospPhone = hospInfo?.phone || '9109102145/9109101246';
     const hospEmail = hospInfo?.email || 'gatroplusbhopal@gmail.com';

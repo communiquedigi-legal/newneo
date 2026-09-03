@@ -98,7 +98,7 @@ export default function Billing() {
   const [loading, setLoading] = useState(false);
   const [templateImage, setTemplateImage] = useState<string | null>(() => storage.get(STORAGE_KEYS.TEMPLATE_IMAGE, null));
   const [hospitalInfo, setHospitalInfo] = useState(() => storage.get(STORAGE_KEYS.HOSPITAL_INFO, {
-    name: 'Gastro Plus Hospital',
+    name: 'NEO GASTRO PLUS HOSPITAL',
     address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
     phone: '9109102145/9109101246',
     email: 'gatroplusbhopal@gmail.com',

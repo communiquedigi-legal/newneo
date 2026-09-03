@@ -352,7 +352,7 @@ export default function Lab() {
   
   const [templateImage, setTemplateImage] = useState<string | null>(() => storage.get(STORAGE_KEYS.TEMPLATE_IMAGE, null));
   const [hospitalInfo, setHospitalInfo] = useState(() => storage.get(STORAGE_KEYS.HOSPITAL_INFO, {
-    name: 'Gastro Plus Hospital',
+    name: 'NEO GASTRO PLUS HOSPITAL',
     address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
     phone: '9109102145/9109101246',
     email: 'gatroplusbhopal@gmail.com',
@@ -886,7 +886,7 @@ export default function Lab() {
       email?: string;
       logo?: string | null;
     }>(STORAGE_KEYS.HOSPITAL_INFO, {
-      name: 'Gastro Plus Hospital',
+      name: 'NEO GASTRO PLUS HOSPITAL',
       address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
       phone: '9109102145/9109101246',
       email: 'gatroplusbhopal@gmail.com'
@@ -1145,7 +1145,7 @@ export default function Lab() {
               <div class="brand-left">
                 ${(hospitalInfo.logo && hospitalInfo.logo !== 'null' && hospitalInfo.logo !== 'undefined' && hospitalInfo.logo.trim() !== '') ? `<img src="${hospitalInfo.logo}" class="hospital-logo" alt="Hospital Logo" />` : ''}
                 <div class="hospital-title-block">
-                  <div class="hospital-name">${hospitalInfo.name || 'Gastro Plus Hospital'}</div>
+                  <div class="hospital-name">${hospitalInfo.name || 'NEO GASTRO PLUS HOSPITAL'}</div>
                   <div class="hospital-tagline">Department of Pathology & Diagnostics</div>
                 </div>
               </div>
@@ -1238,7 +1238,7 @@ export default function Lab() {
       email?: string;
       logo?: string | null;
     }>(STORAGE_KEYS.HOSPITAL_INFO, {
-      name: 'Gastro Plus Hospital',
+      name: 'NEO GASTRO PLUS HOSPITAL',
       address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
       phone: '9109102145/9109101246',
       email: 'gatroplusbhopal@gmail.com'
@@ -1484,7 +1484,7 @@ export default function Lab() {
               <div class="brand-left">
                 ${(hospitalInfo.logo && hospitalInfo.logo !== 'null' && hospitalInfo.logo !== 'undefined' && hospitalInfo.logo.trim() !== '') ? `<img src="${hospitalInfo.logo}" class="hospital-logo" alt="Hospital Logo" />` : ''}
                 <div class="hospital-title-block">
-                  <div class="hospital-name">${hospitalInfo.name || 'Gastro Plus Hospital'}</div>
+                  <div class="hospital-name">${hospitalInfo.name || 'NEO GASTRO PLUS HOSPITAL'}</div>
                   <div class="hospital-tagline">Laboratory & Diagnostic Services</div>
                 </div>
               </div>
@@ -1553,7 +1553,7 @@ export default function Lab() {
             </div>
 
             <div class="footer">
-              <div class="footer-notice">Thank you for choosing Neo Gastroplus Hospital Diagnostics. Get well soon!</div>
+              <div class="footer-notice">Thank you for choosing NEO GASTRO PLUS Hospital Diagnostics. Get well soon!</div>
               <div class="footer-brand">${(hospitalInfo.name || 'NEO GASTRO PLUS HOSPITAL').toUpperCase()} • HEALING HANDS, CARING HEARTS</div>
             </div>
           </div>

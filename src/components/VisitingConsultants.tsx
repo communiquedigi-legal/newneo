@@ -580,7 +580,7 @@ export default function VisitingConsultants({ user, patientId: propPatientId, em
   // Print Consultation Note Sheet
   const handlePrintConsultationNote = (rec: VisitingConsultationRecord) => {
     const hospInfo = storage.get(STORAGE_KEYS.HOSPITAL_INFO, {
-      name: 'Gastro Plus Hospital',
+      name: 'NEO GASTRO PLUS HOSPITAL',
       address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
       phone: '9109102145/9109101246'
     });

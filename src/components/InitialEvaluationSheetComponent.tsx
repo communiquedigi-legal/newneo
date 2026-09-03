@@ -68,8 +68,8 @@ export const InitialEvaluationSheetComponent: React.FC<InitialEvaluationSheetPro
   const currentUser = storage.get(STORAGE_KEYS.SESSION_USER, null);
   const rawHospitalInfo = storage.get(STORAGE_KEYS.HOSPITAL_INFO, null);
   
-  const hospitalName = rawHospitalInfo?.name || 'Gastro Plus Hospital';
-  const hospitalSub = rawHospitalInfo?.subHeader || 'Gastro Plus Hospital (Super Speciality Center)';
+  const hospitalName = rawHospitalInfo?.name || 'NEO GASTRO PLUS HOSPITAL';
+  const hospitalSub = rawHospitalInfo?.subHeader || 'NEO GASTRO PLUS HOSPITAL (Super Speciality Center)';
   const hospitalAddress = rawHospitalInfo?.address || 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh';
   const hospitalPhone = rawHospitalInfo?.phone || '9109102145 / 9109101246';
   const hospitalRegNo = 'Reg. No.: LL/7209/MAY-2026';

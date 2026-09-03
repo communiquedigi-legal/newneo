@@ -484,7 +484,7 @@ export function EndoscopyProcedureModule() {
   // Print Official Payment Invoice / Receipt
   const printDirectReceipt = (proc: DirectEndoscopyProcedure) => {
     const rawHospitalInfo = storage.get(STORAGE_KEYS.HOSPITAL_INFO, null);
-    const hospitalName = rawHospitalInfo?.name || 'GASTRO PLUS HOSPITAL';
+    const hospitalName = rawHospitalInfo?.name || 'NEO GASTRO PLUS HOSPITAL';
     const hospitalAddress = rawHospitalInfo?.address || 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh';
 
     const iframeId = 'direct-receipt-iframe';
@@ -612,7 +612,7 @@ export function EndoscopyProcedureModule() {
   const printConsentForm = (proc: DirectEndoscopyProcedure, langMode?: 'bilingual' | 'english' | 'hindi') => {
     const activeLang = langMode || consentLanguage;
     const rawHospitalInfo = storage.get(STORAGE_KEYS.HOSPITAL_INFO, null);
-    const hospitalName = rawHospitalInfo?.name || 'GASTRO PLUS HOSPITAL';
+    const hospitalName = rawHospitalInfo?.name || 'NEO GASTRO PLUS HOSPITAL';
     const hospitalAddress = rawHospitalInfo?.address || 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh';
 
     const iframeId = 'consent-print-iframe';
@@ -803,7 +803,7 @@ export function EndoscopyProcedureModule() {
   // Print Endoscope Disinfection & Sterilization Log Certificate / Slip
   const printDisinfectionSlip = (log: ScopeDisinfectionLog) => {
     const rawHospitalInfo = storage.get(STORAGE_KEYS.HOSPITAL_INFO, null);
-    const hospitalName = rawHospitalInfo?.name || 'GASTRO PLUS HOSPITAL';
+    const hospitalName = rawHospitalInfo?.name || 'NEO GASTRO PLUS HOSPITAL';
     const hospitalAddress = rawHospitalInfo?.address || 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh';
 
     const iframeId = 'disinfection-print-iframe';

@@ -62,7 +62,7 @@ export function ReportProblemModal({
     const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
     const isAndroid = /Android/i.test(navigator.userAgent);
     return {
-      appName: 'NEO GastroPlus Hospital Management System',
+      appName: 'NEO GASTRO PLUS Hospital Management System',
       version: 'v2.4.0 (Mobile APK Universal)',
       deviceType: isAndroid ? 'Android Phone / Tablet' : isMobile ? 'Mobile Device' : 'Desktop / Workstation',
       screenResolution: `${window.innerWidth}x${window.innerHeight} (DPR: ${window.devicePixelRatio || 1})`,
@@ -190,7 +190,7 @@ ${initialError ? `Error Stack: ${initialError}` : ''}`;
       description
     };
 
-    const message = `*🏥 NEO GastroPlus HMS - Problem Report*
+    const message = `*🏥 NEO GASTRO PLUS HMS - Problem Report*
 *Ticket Ref:* ${ticket.id}
 *Category:* ${category}
 *Severity:* ${severity}

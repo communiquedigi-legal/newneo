@@ -1008,11 +1008,11 @@ export default function OTConsentManagement({ patientId }: OTConsentManagementPr
         </div>
         <div className="space-y-2 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-extrabold text-[#1A5E63] text-lg">GastroPlus Operating Theatre Consent Management</h3>
+            <h3 className="font-extrabold text-[#1A5E63] text-lg">NEO GASTRO PLUS Operating Theatre Consent Management</h3>
             <Badge className="bg-emerald-600 text-white font-bold text-[10px] px-2 py-0.5 uppercase">NABH & WHO Compliant</Badge>
           </div>
           <p className="text-xs text-slate-600 leading-relaxed max-w-4xl">
-            Official Clinical Authorization & Anaesthesia Consent Forms (including General, Spinal/Epidural, Nerve Blocks & MAC). Supports digital signatures, relative/witness verifications, and offline blank physical printouts for GastroPlus Hospital.
+            Official Clinical Authorization & Anaesthesia Consent Forms (including General, Spinal/Epidural, Nerve Blocks & MAC). Supports digital signatures, relative/witness verifications, and offline blank physical printouts for NEO GASTRO PLUS HOSPITAL.
           </p>
           <div className="flex flex-wrap gap-2 pt-1">
             <Button 
@@ -1130,7 +1130,7 @@ export default function OTConsentManagement({ patientId }: OTConsentManagementPr
           }`}
         >
           <FileSignature className="w-4 h-4 text-amber-600" />
-          Surgery Consent Form (GastroPlus - English & Hindi)
+          Surgery Consent Form (NEO GASTRO PLUS - English & Hindi)
         </button>
 
         <button
@@ -1154,7 +1154,7 @@ export default function OTConsentManagement({ patientId }: OTConsentManagementPr
           }`}
         >
           <FileCheck2 className="w-4 h-4 text-indigo-600" />
-          Anaesthesia Record Sheet (GastroPlus Log)
+          Anaesthesia Record Sheet (NEO GASTRO PLUS Log)
         </button>
 
         <button
@@ -1537,10 +1537,10 @@ export default function OTConsentManagement({ patientId }: OTConsentManagementPr
                     <Stethoscope className="w-5 h-5 text-teal-300" />
                     <CardTitle className="text-sm font-black tracking-wide uppercase">Consent for Anaesthesia Services</CardTitle>
                   </div>
-                  <Badge className="bg-teal-700 text-white text-[9px] font-bold">GASTROPLUS HOSPITAL</Badge>
+                  <Badge className="bg-teal-700 text-white text-[9px] font-bold">NEO GASTRO PLUS HOSPITAL</Badge>
                 </div>
                 <CardDescription className="text-teal-100 text-[11px] mt-1">
-                  Official GastroPlus Hospital Anaesthesiology Services Consent Form
+                  Official NEO GASTRO PLUS Hospital Anaesthesiology Services Consent Form
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-4 space-y-3.5 text-xs">
@@ -1932,8 +1932,8 @@ export default function OTConsentManagement({ patientId }: OTConsentManagementPr
                 {/* Hospital Header */}
                 <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex justify-between items-center text-xs">
                   <div>
-                    <h3 className="font-extrabold text-slate-900">GastroPlus Hospital</h3>
-                    <p className="text-[11px] text-slate-500">Neo GastroPlus Hospital (A unit of GP Healthcare)</p>
+                    <h3 className="font-extrabold text-slate-900">NEO GASTRO PLUS HOSPITAL</h3>
+                    <p className="text-[11px] text-slate-500">NEO GASTRO PLUS HOSPITAL (A unit of GP Healthcare)</p>
                   </div>
                   <div className="text-right">
                     <p className="font-mono text-xs font-bold text-slate-700">Reg. No.: {viewingConsent.regNo || 'LL/7209/MAY-2026'}</p>

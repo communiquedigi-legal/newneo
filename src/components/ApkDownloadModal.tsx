@@ -25,7 +25,7 @@ interface ApkDownloadModalProps {
   hospitalName?: string;
 }
 
-export function ApkDownloadModal({ isOpen, onClose, hospitalName = 'Neo GastroPlus Hospital' }: ApkDownloadModalProps) {
+export function ApkDownloadModal({ isOpen, onClose, hospitalName = 'NEO GASTRO PLUS HOSPITAL' }: ApkDownloadModalProps) {
   const [downloading, setDownloading] = useState(false);
   const [activeGuideTab, setActiveGuideTab] = useState<'apk' | 'pwa'>('apk');
 
@@ -245,7 +245,7 @@ export function ApkDownloadModal({ isOpen, onClose, hospitalName = 'Neo GastroPl
                     4
                   </span>
                   <span>
-                    Open <strong className="text-slate-900">Neo GastroPlus HMS</strong> from your app drawer and login with your Staff ID & Password!
+                    Open <strong className="text-slate-900">NEO GASTRO PLUS HMS</strong> from your app drawer and login with your Staff ID & Password!
                   </span>
                 </li>
               </ol>

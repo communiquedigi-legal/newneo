@@ -677,11 +677,11 @@ export const AdmissionSheetModal: React.FC<AdmissionSheetModalProps> = ({
   onSaved
 }) => {
   const hosp = storage.get(STORAGE_KEYS.HOSPITAL_INFO, {
-    name: 'Gastro Plus Hospital',
+    name: 'NEO GASTRO PLUS HOSPITAL',
     address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
     phone: '9109102145 / 9109101246',
     email: 'gatroplusbhopal@gmail.com',
-    website: 'www.gastroplusbhopal.com'
+    website: 'www.neogastroplusbhopal.com'
   });
 
   const todayStr = new Date().toISOString().split('T')[0];
@@ -866,7 +866,7 @@ export const AdmissionSheetModal: React.FC<AdmissionSheetModalProps> = ({
                   Official Inpatient & Day-Care Admission Sheet
                 </DialogTitle>
                 <Badge className="bg-blue-600/40 text-blue-300 border-blue-400/30 text-[11px] font-semibold py-0.5 px-2">
-                  {hosp.name || 'Gastro Plus Hospital'}
+                  {hosp.name || 'NEO GASTRO PLUS HOSPITAL'}
                 </Badge>
                 <Badge variant="outline" className="text-[10px] text-slate-300 border-slate-700 bg-slate-800/80">
                   A4 Medical Docket
@@ -1314,7 +1314,7 @@ export const AdmissionSheetModal: React.FC<AdmissionSheetModalProps> = ({
                       STATUTORY DECLARATION / घोषणा (Printed on Sheet):
                     </p>
                     <div className="space-y-1.5 pl-2 border-l-2 border-amber-400">
-                      <p><strong>1- Voluntary Decision / स्वैच्छिक निर्णय:</strong> I certify that I am leaving / taking the patient from {hosp.name || 'Gastro Plus Hospital'} at my own request and against medical advice.</p>
+                      <p><strong>1- Voluntary Decision / स्वैच्छिक निर्णय:</strong> I certify that I am leaving / taking the patient from {hosp.name || 'NEO GASTRO PLUS HOSPITAL'} at my own request and against medical advice.</p>
                       <p><strong>2- Explanation of Risks / जोखिमों का स्पष्टीकरण:</strong> The medical risks and severe clinical consequences associated with leaving against advice have been fully explained.</p>
                       <p><strong>3- Release of Responsibility / जिम्मेदारी से मुक्ति:</strong> I release the hospital, management and attending doctors from all legal and clinical liabilities.</p>
                     </div>

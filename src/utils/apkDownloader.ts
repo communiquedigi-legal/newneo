@@ -51,7 +51,7 @@ export async function installMobileApp(): Promise<'installed' | 'dismissed' | 'm
 /**
  * Generates and triggers download of the installable Android Mobile package or setup guide
  */
-export function downloadHospitalApk(hospitalName: string = 'NeoGastroPlus') {
+export function downloadHospitalApk(hospitalName: string = 'NEO GASTRO PLUS HOSPITAL') {
   try {
     // If the browser supports native app installation (WebAPK), trigger it directly
     if (deferredPrompt) {
