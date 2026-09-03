@@ -4386,10 +4386,12 @@ const rawSupabaseService = {
         created = (sData && sData[0]) || (pData && pData[0]);
       }
 
+      const finalAvatar = created?.avatar_url || created?.avatar || profile.avatar || dbPayload.avatar_url;
       const rawResult = {
         ...profile,
         ...(created || dbPayload),
-        avatar: created?.avatar_url || created?.avatar || profile.avatar || dbPayload.avatar_url
+        avatar: finalAvatar,
+        avatar_url: finalAvatar
       };
       
       const result = rawSupabaseService.decodeStaffPassword(rawResult);
@@ -4410,7 +4412,8 @@ const rawSupabaseService = {
       const result = rawSupabaseService.decodeStaffPassword({
         ...profile,
         ...dbPayload,
-        avatar: dbPayload.avatar_url
+        avatar: dbPayload.avatar_url,
+        avatar_url: dbPayload.avatar_url
       });
       const existing = storage.get(STORAGE_KEYS.USERS, MOCK_USERS);
       const filtered = existing.filter((u: any) => u.id !== result.id && (!result.email || u.email?.toLowerCase() !== result.email?.toLowerCase()));
@@ -4425,10 +4428,30 @@ const rawSupabaseService = {
     try {
       unmarkStaffDeleted(id, updates.email);
       const dbId = isUuid(id) ? id : toDeterministicUuid(id);
-      const dbPayload = rawSupabaseService.cleanStaffForPostgres({ ...updates, id: dbId });
+      
+      // Look up existing staff record to prevent partial updates (like photo upload) from wiping unpassed fields
+      const existingList = storage.get(STORAGE_KEYS.USERS, MOCK_USERS);
+      const targetUser: any = (Array.isArray(existingList) ? existingList : MOCK_USERS).find((u: any) => 
+        u.id === id || u.id === dbId || String(u.id).toLowerCase() === String(id).toLowerCase() || 
+        (u.email && updates.email && String(u.email).toLowerCase() === String(updates.email).toLowerCase())
+      ) || {};
+
+      const finalAvatar = updates.avatar !== undefined 
+        ? updates.avatar 
+        : (updates.avatar_url !== undefined ? updates.avatar_url : (targetUser.avatar || targetUser.avatar_url));
+
+      const mergedProfile = {
+        ...targetUser,
+        ...updates,
+        avatar: finalAvatar,
+        avatar_url: finalAvatar,
+        id: dbId
+      };
+
+      const dbPayload = rawSupabaseService.cleanStaffForPostgres(mergedProfile);
       delete dbPayload.id; // avoid updating primary key column
 
-      const normEmail = updates.email ? String(updates.email).trim().toLowerCase() : '';
+      const normEmail = (updates.email || targetUser.email) ? String(updates.email || targetUser.email).trim().toLowerCase() : '';
 
       // 1. Update in staff table
       let { data: sData } = await supabase
@@ -4491,21 +4514,25 @@ const rawSupabaseService = {
       const updated = (sData && sData[0]) || (pData && pData[0]);
       
       const rawResult = updated ? {
+        ...targetUser,
         ...updates,
         ...updated,
-        avatar: updated.avatar_url || updated.avatar || updates.avatar,
+        avatar: finalAvatar || updated.avatar_url || updated.avatar || updates.avatar,
+        avatar_url: finalAvatar || updated.avatar_url || updated.avatar || updates.avatar,
         id: id // preserve original ID reference for local continuity
       } : {
+        ...targetUser,
         ...updates,
         ...dbPayload,
+        avatar: finalAvatar,
+        avatar_url: finalAvatar,
         id: id
       };
       
       const result = rawSupabaseService.decodeStaffPassword(rawResult);
 
       // Sync to local storage
-      const existing = storage.get(STORAGE_KEYS.USERS, MOCK_USERS);
-      const updatedList = existing.map((u: any) => {
+      const updatedList = (Array.isArray(existingList) ? existingList : MOCK_USERS).map((u: any) => {
         const isMatch = u.id === id || u.id === dbId || String(u.id).toLowerCase() === String(id).toLowerCase() || (u.email && normEmail && u.email.toLowerCase() === normEmail);
         return isMatch ? { ...u, ...result } : u;
       });
@@ -4519,10 +4546,24 @@ const rawSupabaseService = {
       console.error('Error updating staff:', error.message);
       unmarkStaffDeleted(id, updates.email);
       const dbId = isUuid(id) ? id : toDeterministicUuid(id);
-      const dbPayload = rawSupabaseService.cleanStaffForPostgres({ ...updates, id: dbId });
-      const result = rawSupabaseService.decodeStaffPassword({ ...updates, ...dbPayload, id });
-      const existing = storage.get(STORAGE_KEYS.USERS, MOCK_USERS);
-      const updatedList = existing.map((u: any) => {
+      const existingList = storage.get(STORAGE_KEYS.USERS, MOCK_USERS);
+      const targetUser: any = (Array.isArray(existingList) ? existingList : MOCK_USERS).find((u: any) => 
+        u.id === id || u.id === dbId || String(u.id).toLowerCase() === String(id).toLowerCase() || 
+        (u.email && updates.email && String(u.email).toLowerCase() === String(updates.email).toLowerCase())
+      ) || {};
+      const finalAvatar = updates.avatar !== undefined 
+        ? updates.avatar 
+        : (updates.avatar_url !== undefined ? updates.avatar_url : (targetUser.avatar || targetUser.avatar_url));
+      const mergedProfile = {
+        ...targetUser,
+        ...updates,
+        avatar: finalAvatar,
+        avatar_url: finalAvatar,
+        id: dbId
+      };
+      const dbPayload = rawSupabaseService.cleanStaffForPostgres(mergedProfile);
+      const result = rawSupabaseService.decodeStaffPassword({ ...mergedProfile, ...dbPayload, id, avatar: finalAvatar, avatar_url: finalAvatar });
+      const updatedList = (Array.isArray(existingList) ? existingList : MOCK_USERS).map((u: any) => {
         const isMatch = u.id === id || u.id === dbId || String(u.id).toLowerCase() === String(id).toLowerCase() || (u.email && updates.email && u.email.toLowerCase() === updates.email.toLowerCase());
         return isMatch ? { ...u, ...result } : u;
       });

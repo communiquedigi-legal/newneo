@@ -25,7 +25,7 @@ import {
   Upload,
   Image as ImageIcon
 } from 'lucide-react';
-import { getStaffPhotoUrl } from '@/utils/staffPhotos';
+import { getStaffPhotoUrl, compressStaffPhoto } from '@/utils/staffPhotos';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -627,7 +627,8 @@ export default function Staff() {
       regNo: newStaff.registrationNo || '',
       labLicenseNo: isLabOrPharmacy(newStaff.role) ? (newStaff.labLicenseNo || '') : '',
       licenseNumber: isLabOrPharmacy(newStaff.role) ? (newStaff.labLicenseNo || '') : '',
-      avatar: (newStaff as any).avatar || getStaffPhotoUrl({ name: staffName, role: mapFormRoleToDbRole(newStaff.role), department: newStaff.department })
+      avatar: (newStaff as any).avatar || (newStaff as any).avatar_url || getStaffPhotoUrl({ name: staffName, role: mapFormRoleToDbRole(newStaff.role), department: newStaff.department }),
+      avatar_url: (newStaff as any).avatar || (newStaff as any).avatar_url || getStaffPhotoUrl({ name: staffName, role: mapFormRoleToDbRole(newStaff.role), department: newStaff.department })
     };
 
     try {
@@ -656,6 +657,8 @@ export default function Staff() {
     const fallbackEmail = `${staffName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'staff'}@neogastroplushospital.com`;
     const finalEmail = (editingStaff.email || '').trim() || fallbackEmail;
 
+    const finalAvatar = editingStaff.avatar || editingStaff.avatar_url || getStaffPhotoUrl({ name: staffName, role: mapFormRoleToDbRole(editingStaff.role), department: editingStaff.department });
+
     const updates = {
       name: staffName,
       email: finalEmail,
@@ -669,7 +672,8 @@ export default function Staff() {
       regNo: editingStaff.registrationNo || '',
       labLicenseNo: isLabOrPharmacy(editingStaff.role) ? (editingStaff.labLicenseNo || '') : '',
       licenseNumber: isLabOrPharmacy(editingStaff.role) ? (editingStaff.labLicenseNo || '') : '',
-      avatar: editingStaff.avatar || getStaffPhotoUrl({ name: staffName, role: mapFormRoleToDbRole(editingStaff.role), department: editingStaff.department })
+      avatar: finalAvatar,
+      avatar_url: finalAvatar
     };
 
     try {
@@ -689,25 +693,25 @@ export default function Staff() {
     }
   };
 
-  const handleUploadStaffPhoto = (e: React.ChangeEvent<HTMLInputElement>, staffMember: any) => {
+  const handleUploadStaffPhoto = async (e: React.ChangeEvent<HTMLInputElement>, staffMember: any) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const base64 = event.target?.result as string;
-      if (base64 && staffMember) {
-        const updated = { ...staffMember, avatar: base64 };
-        setSelectedBadgeStaff(updated);
-        setStaff(prev => prev.map(s => s.id === staffMember.id ? updated : s));
-        try {
-          await supabaseService.updateStaff(staffMember.id, { avatar: base64 });
-          toast.success(`Photo updated successfully for ${staffMember.name}`);
-        } catch (err) {
-          console.error('Error saving staff photo:', err);
-        }
+    if (!file || !staffMember) return;
+    try {
+      toast.loading('Processing and updating photo...', { id: 'staff-photo-upload' });
+      const compressed = await compressStaffPhoto(file);
+      const updated = { ...staffMember, avatar: compressed, avatar_url: compressed };
+      setSelectedBadgeStaff(prev => (prev && prev.id === staffMember.id ? updated : prev));
+      if (editingStaff && editingStaff.id === staffMember.id) {
+        setEditingStaff((prev: any) => ({ ...prev, avatar: compressed, avatar_url: compressed }));
       }
-    };
-    reader.readAsDataURL(file);
+      setStaff(prev => prev.map(s => s.id === staffMember.id ? updated : s));
+      await supabaseService.updateStaff(staffMember.id, { avatar: compressed, avatar_url: compressed });
+      toast.success(`Photo updated successfully for ${staffMember.name}`, { id: 'staff-photo-upload' });
+      fetchData();
+    } catch (err: any) {
+      console.error('Error saving staff photo:', err);
+      toast.error('Failed to update photo: ' + (err.message || 'Unknown error'), { id: 'staff-photo-upload' });
+    }
   };
 
   const handleDeleteStaff = (id: string) => {
@@ -814,39 +818,90 @@ export default function Staff() {
                 </DialogHeader>
                 <div className="grid grid-cols-2 gap-4 py-4">
                   {/* Photo upload and preview */}
-                  <div className="col-span-2 flex items-center gap-4 p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-                    <Avatar className="w-14 h-14 border-2 border-[#1A5E63] shadow-sm">
-                      <AvatarImage 
-                        src={(newStaff as any).avatar || getStaffPhotoUrl({ name: newStaff.name || 'New Staff', role: mapFormRoleToDbRole(newStaff.role), department: newStaff.department })} 
-                        className="object-cover" 
-                      />
-                      <AvatarFallback className="bg-teal-50 text-[#1A5E63] font-bold text-lg">
-                        {newStaff.name ? newStaff.name.charAt(0) : 'S'}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="space-y-1">
-                      <Label className="text-xs font-bold text-slate-700">Staff Photo (Real Portrait)</Label>
-                      <p className="text-[10px] text-slate-500">Auto-assigned realistic medical portrait or upload real photo:</p>
-                      <label className="inline-flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 cursor-pointer shadow-2xs transition-colors">
-                        <Upload className="w-3.5 h-3.5 text-[#1A5E63]" />
-                        <span>{(newStaff as any).avatar ? 'Change Uploaded Photo' : 'Upload Real Photo'}</span>
+                  <div className="col-span-2 flex items-center gap-4 p-3.5 bg-slate-50 rounded-xl border border-slate-200/80">
+                    <div className="relative group cursor-pointer">
+                      <Avatar className="w-16 h-16 border-2 border-[#1A5E63] shadow-md">
+                        <AvatarImage 
+                          src={(newStaff as any).avatar || getStaffPhotoUrl({ name: newStaff.name || 'New Staff', role: mapFormRoleToDbRole(newStaff.role), department: newStaff.department })} 
+                          className="object-cover" 
+                        />
+                        <AvatarFallback className="bg-teal-50 text-[#1A5E63] font-black text-xl">
+                          {newStaff.name ? newStaff.name.charAt(0) : 'S'}
+                        </AvatarFallback>
+                      </Avatar>
+                      <label 
+                        title="Click to select photo"
+                        className="absolute inset-0 bg-black/60 rounded-full flex flex-col items-center justify-center text-white text-[9px] font-bold opacity-0 group-hover:opacity-100 cursor-pointer transition-all shadow-inner"
+                      >
+                        <Camera className="w-5 h-5 mb-0.5" />
+                        <span>Change</span>
                         <input 
                           type="file" 
                           accept="image/*" 
                           className="hidden" 
-                          onChange={(e) => {
+                          onChange={async (e) => {
                             const file = e.target.files?.[0];
                             if (file) {
-                              const reader = new FileReader();
-                              reader.onload = (evt) => {
-                                const base64 = evt.target?.result as string;
-                                if (base64) setNewStaff(prev => ({ ...prev, avatar: base64 } as any));
-                              };
-                              reader.readAsDataURL(file);
+                              try {
+                                const base64 = await compressStaffPhoto(file);
+                                setNewStaff(prev => ({ ...prev, avatar: base64, avatar_url: base64 } as any));
+                                toast.success('Photo uploaded & optimized');
+                              } catch (err) {
+                                toast.error('Error processing photo');
+                              }
                             }
                           }}
                         />
                       </label>
+                    </div>
+
+                    <div className="flex-1 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-bold text-slate-700">Staff Photo (Portrait)</Label>
+                        {(newStaff as any).avatar && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewStaff(prev => ({ ...prev, avatar: '', avatar_url: '' } as any));
+                              toast.info('Reset to default medical portrait');
+                            }}
+                            className="text-[10px] text-rose-600 hover:text-rose-700 hover:underline font-semibold"
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500">Auto-assigned portrait or upload custom staff photo:</p>
+                      <div className="flex items-center gap-2">
+                        <label className="inline-flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 cursor-pointer shadow-2xs transition-colors">
+                          <Upload className="w-3.5 h-3.5 text-[#1A5E63]" />
+                          <span>{(newStaff as any).avatar ? 'Replace' : 'Upload File'}</span>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                try {
+                                  const base64 = await compressStaffPhoto(file);
+                                  setNewStaff(prev => ({ ...prev, avatar: base64, avatar_url: base64 } as any));
+                                  toast.success('Photo uploaded & optimized');
+                                } catch (err) {
+                                  toast.error('Error processing photo');
+                                }
+                              }
+                            }}
+                          />
+                        </label>
+                        <span className="text-[10px] text-slate-400">or</span>
+                        <Input 
+                          placeholder="Paste image URL (https://...)" 
+                          value={(newStaff as any).avatar && !(newStaff as any).avatar.startsWith('data:image/') ? (newStaff as any).avatar : ''}
+                          onChange={(e) => setNewStaff(prev => ({ ...prev, avatar: e.target.value, avatar_url: e.target.value } as any))}
+                          className="text-xs h-7.5 flex-1"
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -1098,12 +1153,26 @@ export default function Staff() {
                           {/* Employee */}
                           <TableCell className="whitespace-nowrap">
                             <div className="flex items-center gap-3">
-                              <Avatar className="w-10 h-10 border-2 border-slate-100">
-                                <AvatarImage src={getStaffPhotoUrl(user)} />
-                                <AvatarFallback className="bg-teal-50 text-[#1A5E63] font-bold">
-                                  {user.name.charAt(0)}
-                                </AvatarFallback>
-                              </Avatar>
+                              <div className="relative group">
+                                <Avatar className="w-10 h-10 border-2 border-slate-100 shadow-2xs">
+                                  <AvatarImage src={getStaffPhotoUrl(user)} className="object-cover" />
+                                  <AvatarFallback className="bg-teal-50 text-[#1A5E63] font-bold">
+                                    {user.name.charAt(0)}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <label 
+                                  title="Click to change staff photo"
+                                  className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center text-white opacity-0 group-hover:opacity-100 cursor-pointer transition-all shadow-inner"
+                                >
+                                  <Camera className="w-3.5 h-3.5" />
+                                  <input 
+                                    type="file" 
+                                    accept="image/*" 
+                                    className="hidden" 
+                                    onChange={(e) => handleUploadStaffPhoto(e, user)} 
+                                  />
+                                </label>
+                              </div>
                               <div>
                                 <p className="font-bold text-xs text-slate-800">{user.name}</p>
                                 <p className="text-[10px] font-mono text-[#1A5E63] font-semibold">{empIdCode}</p>
@@ -1969,39 +2038,90 @@ export default function Staff() {
           </DialogHeader>
           <div className="grid grid-cols-2 gap-4 py-4">
             {/* Photo upload and preview in Edit modal */}
-            <div className="col-span-2 flex items-center gap-4 p-3 bg-slate-50 rounded-xl border border-slate-200/80">
-              <Avatar className="w-14 h-14 border-2 border-[#1A5E63] shadow-sm">
-                <AvatarImage 
-                  src={getStaffPhotoUrl(editingStaff)} 
-                  className="object-cover" 
-                />
-                <AvatarFallback className="bg-teal-50 text-[#1A5E63] font-bold text-lg">
-                  {editingStaff?.name ? editingStaff.name.charAt(0) : 'S'}
-                </AvatarFallback>
-              </Avatar>
-              <div className="space-y-1">
-                <Label className="text-xs font-bold text-slate-700">Staff Photo (Real Portrait)</Label>
-                <p className="text-[10px] text-slate-500">Realistic portrait or custom uploaded photo:</p>
-                <label className="inline-flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 cursor-pointer shadow-2xs transition-colors">
-                  <Upload className="w-3.5 h-3.5 text-[#1A5E63]" />
-                  <span>Upload Real Photo</span>
+            <div className="col-span-2 flex items-center gap-4 p-3.5 bg-slate-50 rounded-xl border border-slate-200/80">
+              <div className="relative group cursor-pointer">
+                <Avatar className="w-16 h-16 border-2 border-[#1A5E63] shadow-md">
+                  <AvatarImage 
+                    src={getStaffPhotoUrl(editingStaff)} 
+                    className="object-cover" 
+                  />
+                  <AvatarFallback className="bg-teal-50 text-[#1A5E63] font-black text-xl">
+                    {editingStaff?.name ? editingStaff.name.charAt(0) : 'S'}
+                  </AvatarFallback>
+                </Avatar>
+                <label 
+                  title="Click to select new photo"
+                  className="absolute inset-0 bg-black/60 rounded-full flex flex-col items-center justify-center text-white text-[9px] font-bold opacity-0 group-hover:opacity-100 cursor-pointer transition-all shadow-inner"
+                >
+                  <Camera className="w-5 h-5 mb-0.5" />
+                  <span>Change</span>
                   <input 
                     type="file" 
                     accept="image/*" 
                     className="hidden" 
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (file) {
-                        const reader = new FileReader();
-                        reader.onload = (evt) => {
-                          const base64 = evt.target?.result as string;
-                          if (base64) setEditingStaff(prev => ({ ...prev, avatar: base64 }));
-                        };
-                        reader.readAsDataURL(file);
+                        try {
+                          const base64 = await compressStaffPhoto(file);
+                          setEditingStaff((prev: any) => ({ ...prev, avatar: base64, avatar_url: base64 }));
+                          toast.success('Photo uploaded & optimized (click Save to persist)');
+                        } catch (err) {
+                          toast.error('Error processing photo');
+                        }
                       }
                     }}
                   />
                 </label>
+              </div>
+
+              <div className="flex-1 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-bold text-slate-700">Staff Photo / Avatar</Label>
+                  {editingStaff?.avatar && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingStaff((prev: any) => ({ ...prev, avatar: '', avatar_url: '' }));
+                        toast.info('Reset to default medical portrait');
+                      }}
+                      className="text-[10px] text-rose-600 hover:text-rose-700 hover:underline font-semibold"
+                    >
+                      Reset to Default
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-500">Upload portrait photo or enter image URL:</p>
+                <div className="flex items-center gap-2">
+                  <label className="inline-flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 cursor-pointer shadow-2xs transition-colors">
+                    <Upload className="w-3.5 h-3.5 text-[#1A5E63]" />
+                    <span>Upload New Photo</span>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          try {
+                            const base64 = await compressStaffPhoto(file);
+                            setEditingStaff((prev: any) => ({ ...prev, avatar: base64, avatar_url: base64 }));
+                            toast.success('Photo uploaded & optimized');
+                          } catch (err) {
+                            toast.error('Error processing photo');
+                          }
+                        }
+                      }}
+                    />
+                  </label>
+                  <span className="text-[10px] text-slate-400">or</span>
+                  <Input 
+                    placeholder="Paste image URL (https://...)" 
+                    value={editingStaff?.avatar && !editingStaff.avatar.startsWith('data:image/') ? editingStaff.avatar : ''}
+                    onChange={(e) => setEditingStaff((prev: any) => ({ ...prev, avatar: e.target.value, avatar_url: e.target.value }))}
+                    className="text-xs h-7.5 flex-1"
+                  />
+                </div>
               </div>
             </div>
 

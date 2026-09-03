@@ -1,7 +1,7 @@
 import React, { useState, ChangeEvent, useEffect, useRef } from 'react';
 import RateListExcelUploader from './RateListExcelUploader';
 import HospitalTariffManager from './HospitalTariffManager';
-import { getStaffPhotoUrl } from '../utils/staffPhotos';
+import { getStaffPhotoUrl, compressStaffPhoto } from '../utils/staffPhotos';
 import { 
   Building2, 
   MapPin, 
@@ -13,6 +13,7 @@ import {
   Edit, 
   Save, 
   Upload,
+  Camera,
   ShieldCheck,
   Users,
   Stethoscope,
@@ -609,7 +610,8 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
     name: currentUser?.name || '',
     email: currentUser?.email || '',
     phone: currentUser?.phone || '+91 98765 43210',
-    password: currentUser?.password || ''
+    password: currentUser?.password || '',
+    avatar: currentUser?.avatar || currentUser?.avatar_url || ''
   });
 
   useEffect(() => {
@@ -618,14 +620,21 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
         name: currentUser.name || '',
         email: currentUser.email || '',
         phone: currentUser.phone || '+91 98765 43210',
-        password: currentUser.password || ''
+        password: currentUser.password || '',
+        avatar: currentUser.avatar || currentUser.avatar_url || ''
       });
     }
   }, [currentUser]);
 
   const handleUpdateProfile = async () => {
     if (onUserUpdate && currentUser) {
-      const updatedUser = { ...currentUser, ...profileData };
+      const finalAvatar = profileData.avatar || currentUser.avatar || currentUser.avatar_url;
+      const updatedUser = { 
+        ...currentUser, 
+        ...profileData,
+        avatar: finalAvatar,
+        avatar_url: finalAvatar
+      };
       
       try {
         await supabaseService.updateStaff(currentUser.id, updatedUser);
@@ -819,7 +828,7 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
   // User Management
   const [users, setUsers] = useState<any[]>(() => storage.get(STORAGE_KEYS.USERS, MOCK_USERS));
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [newUser, setNewUser] = useState({ name: '', email: '', role: 'DOCTOR', department: '', password: '', registrationNo: '', labLicenseNo: '' });
+  const [newUser, setNewUser] = useState({ name: '', email: '', role: 'DOCTOR', department: '', password: '', registrationNo: '', labLicenseNo: '', avatar: '' });
 
   const fetchUsers = async () => {
     try {
@@ -1147,6 +1156,8 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
 
     if (editingUserId) {
       // Update existing user
+      const existingUser = users.find((u: any) => u.id === editingUserId);
+      const userAvatar = newUser.avatar || existingUser?.avatar || existingUser?.avatar_url || getStaffPhotoUrl({ name: newUser.name, role: newUser.role, department: newUser.department });
       const updates: any = {
         name: newUser.name,
         email: newUser.email,
@@ -1157,7 +1168,8 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
         regNo: newUser.registrationNo || '',
         labLicenseNo: ['PATHOLOGY', 'RADIOLOGY', 'LAB_STAFF', 'PHARMACIST', 'PHARMACY'].includes(newUser.role) ? (newUser.labLicenseNo || '') : '',
         licenseNumber: ['PATHOLOGY', 'RADIOLOGY', 'LAB_STAFF', 'PHARMACIST', 'PHARMACY'].includes(newUser.role) ? (newUser.labLicenseNo || '') : '',
-        avatar: getStaffPhotoUrl({ name: newUser.name, role: newUser.role, department: newUser.department })
+        avatar: userAvatar,
+        avatar_url: userAvatar
       };
       if (newUser.password) {
         updates.password = newUser.password;
@@ -1189,6 +1201,7 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
       fetchUsers();
     } else {
       // Add new user
+      const userAvatar = newUser.avatar || getStaffPhotoUrl({ name: newUser.name, role: newUser.role, department: newUser.department });
       const staffToAdd = {
         name: newUser.name,
         email: newUser.email,
@@ -1200,7 +1213,8 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
         regNo: newUser.registrationNo || '',
         labLicenseNo: ['PATHOLOGY', 'RADIOLOGY', 'LAB_STAFF', 'PHARMACIST', 'PHARMACY'].includes(newUser.role) ? (newUser.labLicenseNo || '') : '',
         licenseNumber: ['PATHOLOGY', 'RADIOLOGY', 'LAB_STAFF', 'PHARMACIST', 'PHARMACY'].includes(newUser.role) ? (newUser.labLicenseNo || '') : '',
-        avatar: getStaffPhotoUrl({ name: newUser.name, role: newUser.role, department: newUser.department })
+        avatar: userAvatar,
+        avatar_url: userAvatar
       };
       
       const result = await supabaseService.createStaff(staffToAdd);
@@ -1213,7 +1227,7 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
       }
     }
     
-    setNewUser({ name: '', email: '', role: 'DOCTOR', department: '', password: '', registrationNo: '', labLicenseNo: '' });
+    setNewUser({ name: '', email: '', role: 'DOCTOR', department: '', password: '', registrationNo: '', labLicenseNo: '', avatar: '' });
   };
 
   const handleAddMedicine = () => {
@@ -1849,11 +1863,63 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
             <CardContent className="space-y-6">
               <div className="flex flex-col md:flex-row gap-8">
                 <div className="flex flex-col items-center gap-4">
-                  <Avatar className="w-24 h-24 border-2 border-white shadow-md">
-                    <AvatarImage src={currentUser?.avatar} />
-                    <AvatarFallback>{currentUser?.name.substring(0, 2).toUpperCase()}</AvatarFallback>
-                  </Avatar>
-                  <Button variant="outline" size="sm" className="h-8 text-xs">Change Avatar</Button>
+                  <div className="relative group cursor-pointer">
+                    <Avatar className="w-24 h-24 border-2 border-white shadow-md">
+                      <AvatarImage 
+                        src={profileData.avatar || getStaffPhotoUrl(currentUser)} 
+                        className="object-cover" 
+                      />
+                      <AvatarFallback className="text-xl font-bold bg-teal-50 text-[#1A5E63]">
+                        {currentUser?.name?.substring(0, 2).toUpperCase() || 'ME'}
+                      </AvatarFallback>
+                    </Avatar>
+                    <label 
+                      title="Click to change profile picture"
+                      className="absolute inset-0 bg-black/60 rounded-full flex flex-col items-center justify-center text-white text-[10px] font-bold opacity-0 group-hover:opacity-100 cursor-pointer transition-all shadow-inner"
+                    >
+                      <Camera className="w-6 h-6 mb-1" />
+                      <span>Change</span>
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        className="hidden" 
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            try {
+                              const base64 = await compressStaffPhoto(file);
+                              setProfileData(prev => ({ ...prev, avatar: base64 }));
+                              toast.success('Photo uploaded (click Update Profile to save)');
+                            } catch (err) {
+                              toast.error('Failed to process photo');
+                            }
+                          }
+                        }} 
+                      />
+                    </label>
+                  </div>
+                  <label className="cursor-pointer">
+                    <Button variant="outline" size="sm" className="h-8 text-xs pointer-events-none" asChild>
+                      <span>Change Avatar</span>
+                    </Button>
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="hidden" 
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          try {
+                            const base64 = await compressStaffPhoto(file);
+                            setProfileData(prev => ({ ...prev, avatar: base64 }));
+                            toast.success('Photo uploaded (click Update Profile to save)');
+                          } catch (err) {
+                            toast.error('Failed to process photo');
+                          }
+                        }
+                      }} 
+                    />
+                  </label>
                 </div>
                 
                 <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2494,7 +2560,82 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
                     />
                   </div>
                 )}
-                <div className="flex items-end gap-2">
+                {/* User Photo in Creation Form */}
+                <div className="md:col-span-3 flex items-center gap-4 p-3 bg-white rounded-lg border border-slate-200">
+                  <div className="relative group cursor-pointer shrink-0">
+                    <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-medical-blue bg-slate-100 shadow-sm">
+                      <img 
+                        src={newUser.avatar || getStaffPhotoUrl({ name: newUser.name || 'User', role: newUser.role, department: newUser.department })} 
+                        alt="User Avatar" 
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    <label 
+                      title="Upload photo" 
+                      className="absolute inset-0 bg-black/60 rounded-full flex flex-col items-center justify-center text-white text-[8px] font-bold opacity-0 group-hover:opacity-100 cursor-pointer transition-all shadow-inner"
+                    >
+                      <Camera className="w-4 h-4 mb-0.5" />
+                      <span>Change</span>
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        className="hidden" 
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            try {
+                              const compressed = await compressStaffPhoto(file);
+                              setNewUser(prev => ({ ...prev, avatar: compressed }));
+                              toast.success('Photo optimized');
+                            } catch (err) {
+                              toast.error('Failed to process image');
+                            }
+                          }
+                        }} 
+                      />
+                    </label>
+                  </div>
+                  <div className="flex-1 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <Label className="text-xs font-bold text-slate-700">Account Profile Picture</Label>
+                      <p className="text-[11px] text-slate-500">Auto-assigned portrait or custom uploaded portrait:</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 cursor-pointer transition-colors">
+                        <Upload className="w-3.5 h-3.5 text-medical-blue" />
+                        <span>{newUser.avatar ? 'Change Photo' : 'Upload Photo'}</span>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden" 
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              try {
+                                const compressed = await compressStaffPhoto(file);
+                                setNewUser(prev => ({ ...prev, avatar: compressed }));
+                                toast.success('Photo optimized');
+                              } catch (err) {
+                                toast.error('Failed to process image');
+                              }
+                            }
+                          }} 
+                        />
+                      </label>
+                      {newUser.avatar && (
+                        <button
+                          type="button"
+                          onClick={() => setNewUser(prev => ({ ...prev, avatar: '' }))}
+                          className="text-xs text-rose-600 hover:underline font-semibold"
+                        >
+                          Reset
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-end gap-2 md:col-span-3">
                   <Button className="bg-medical-blue flex-1 gap-2" onClick={handleAddUser}>
                     <ShieldCheck className="w-4 h-4" />
                     {editingUserId ? 'Update Account' : 'Create Account'}
@@ -2502,7 +2643,7 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
                   {editingUserId && (
                     <Button variant="outline" onClick={() => {
                       setEditingUserId(null);
-                      setNewUser({ name: '', email: '', role: 'DOCTOR', department: '', password: '', registrationNo: '', labLicenseNo: '' });
+                      setNewUser({ name: '', email: '', role: 'DOCTOR', department: '', password: '', registrationNo: '', labLicenseNo: '', avatar: '' });
                     }}>
                       Cancel
                     </Button>
@@ -2515,8 +2656,37 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {users.map((user) => (
                     <div key={user.id} className="p-4 bg-white rounded-xl border border-slate-100 shadow-sm flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-full bg-slate-100 overflow-hidden border border-slate-200">
-                        <img src={user.avatar} alt={user.name} />
+                      <div className="relative group w-12 h-12 rounded-full bg-slate-100 overflow-hidden border border-slate-200 shrink-0 shadow-2xs">
+                        <img src={getStaffPhotoUrl(user)} alt={user.name} className="w-full h-full object-cover" />
+                        <label 
+                          title="Upload / edit photo"
+                          className="absolute inset-0 bg-black/60 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 cursor-pointer transition-all shadow-inner"
+                        >
+                          <Camera className="w-4 h-4" />
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                try {
+                                  toast.loading('Optimizing & updating photo...', { id: 'user-photo' });
+                                  const compressed = await compressStaffPhoto(file);
+                                  await supabaseService.updateStaff(user.id, { avatar: compressed, avatar_url: compressed });
+                                  setUsers(prev => prev.map((u: any) => u.id === user.id ? { ...u, avatar: compressed, avatar_url: compressed } : u));
+                                  if (currentUser && currentUser.id === user.id) {
+                                    onUserUpdate({ ...currentUser, avatar: compressed, avatar_url: compressed });
+                                  }
+                                  toast.success(`Photo updated for ${user.name}`, { id: 'user-photo' });
+                                  fetchUsers();
+                                } catch (err) {
+                                  toast.error('Failed to update photo', { id: 'user-photo' });
+                                }
+                              }
+                            }} 
+                          />
+                        </label>
                       </div>
                       <div className="flex-1 overflow-hidden">
                         <p className="text-sm font-bold truncate">{user.name}</p>
@@ -2541,7 +2711,10 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
                             email: user.email,
                             role: user.role,
                             department: user.department || '',
-                            password: isAdmin ? (user.password || '') : '' // Only pre-fill password for admin
+                            password: isAdmin ? (user.password || '') : '', // Only pre-fill password for admin
+                            registrationNo: user.registrationNo || user.regNo || '',
+                            labLicenseNo: user.labLicenseNo || user.licenseNumber || '',
+                            avatar: user.avatar || user.avatar_url || ''
                           });
                           const element = document.getElementById('user-creation-form');
                           if (element) element.scrollIntoView({ behavior: 'smooth' });

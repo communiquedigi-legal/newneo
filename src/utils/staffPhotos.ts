@@ -78,6 +78,71 @@ export function isCartoonAvatar(url: string | null | undefined): boolean {
 }
 
 /**
+ * Compresses and resizes an uploaded staff photo to an optimal 400x400 JPEG.
+ * This reduces image size from 5-10MB down to ~20-30KB, ensuring:
+ * - Instant loading and rendering
+ * - Prevents Supabase 413 Payload Too Large / network timeouts
+ * - Prevents browser localStorage QuotaExceededError
+ */
+export async function compressStaffPhoto(file: File, maxDim = 400, quality = 0.85): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!file) {
+      reject(new Error('No file provided'));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = (e) => reject(e);
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      if (!result) {
+        resolve('');
+        return;
+      }
+      const img = new Image();
+      img.onerror = () => resolve(result); // fallback to raw string if image decode fails
+      img.onload = () => {
+        let width = img.width || 400;
+        let height = img.height || 400;
+
+        if (width > height) {
+          if (width > maxDim) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          }
+        } else {
+          if (height > maxDim) {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, width);
+        canvas.height = Math.max(1, height);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(result);
+          return;
+        }
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, width, height);
+
+        try {
+          const compressed = canvas.toDataURL('image/jpeg', quality);
+          resolve(compressed);
+        } catch {
+          resolve(result);
+        }
+      };
+      img.src = result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
  * Resolves an authentic, real professional photo for any doctor or staff member.
  * If the user has uploaded an actual photo (Base64 data:image or custom URL), it is preserved.
  * If the avatar is missing or a cartoon avatar, a real medical professional photo is returned.
@@ -87,7 +152,15 @@ export function getStaffPhotoUrl(staffOrUser: any): string {
     return DOCTOR_MALE_POOL[0];
   }
 
-  const rawAvatar = typeof staffOrUser === 'string' ? staffOrUser : (staffOrUser.avatar_url || staffOrUser.avatar || staffOrUser.photo || '');
+  // Priority: if an uploaded base64 data image or explicit avatar is provided, prefer it
+  let rawAvatar = '';
+  if (typeof staffOrUser === 'string') {
+    rawAvatar = staffOrUser;
+  } else if (staffOrUser && typeof staffOrUser === 'object') {
+    rawAvatar = (staffOrUser.avatar && !isCartoonAvatar(staffOrUser.avatar))
+      ? staffOrUser.avatar
+      : (staffOrUser.avatar_url || staffOrUser.avatar || staffOrUser.photo || '');
+  }
   const staffName = (typeof staffOrUser === 'object' ? (staffOrUser.name || staffOrUser.fullName || '') : '').trim();
   const staffRole = (typeof staffOrUser === 'object' ? String(staffOrUser.role || staffOrUser.designation || '').toUpperCase() : '').trim();
   const staffDept = (typeof staffOrUser === 'object' ? String(staffOrUser.department || staffOrUser.specialization || staffOrUser.specialty || '').toLowerCase() : '').trim();
