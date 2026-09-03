@@ -4042,17 +4042,25 @@ const rawSupabaseService = {
       item.labLicenseNo = item.lab_license_no || item.labLicenseNo || item.license_number || item.licenseNumber;
       item.licenseNumber = item.labLicenseNo;
     }
+    const expMatch = item.degree?.match(/\[exp:(.*?)\]/);
+    if (expMatch) {
+      item.experience = expMatch[1];
+      item.degree = item.degree.replace(/\[exp:(.*?)\]/, '').trim();
+    }
+    item.qualification = item.qualification || item.degree || '';
+    item.specialty = item.specialty || item.specialization || '';
     return item;
   },
 
   encodeStaffPassword: (staffMember: any) => {
     if (!staffMember) return staffMember;
     const dbStaff = { ...staffMember };
-    let cleanDegree = (dbStaff.degree || '')
+    let cleanDegree = (dbStaff.degree || dbStaff.qualification || '')
       .replace(/\[pwd:(.*?)\]/, '')
       .replace(/\[fee:(.*?)\]/, '')
       .replace(/\[reg:(.*?)\]/, '')
       .replace(/\[lablic:(.*?)\]/, '')
+      .replace(/\[exp:(.*?)\]/, '')
       .trim();
     
     if (dbStaff.password) {
@@ -4072,6 +4080,11 @@ const rawSupabaseService = {
     const labLicValue = dbStaff.labLicenseNo || dbStaff.licenseNumber || dbStaff.lab_license_no;
     if (labLicValue) {
       cleanDegree = `${cleanDegree} [lablic:${labLicValue}]`.trim();
+    }
+
+    const expValue = dbStaff.experience !== undefined && dbStaff.experience !== null ? String(dbStaff.experience).trim() : '';
+    if (expValue) {
+      cleanDegree = `${cleanDegree} [exp:${expValue}]`.trim();
     }
     
     dbStaff.degree = cleanDegree;
@@ -4183,12 +4196,21 @@ const rawSupabaseService = {
             item.licenseNumber = item.labLicenseNo;
           }
 
+          // Decode exp
+          const expMatch = item.degree?.match(/\[exp:(.*?)\]/);
+          if (expMatch) {
+            item.experience = expMatch[1];
+            item.degree = item.degree.replace(/\[exp:(.*?)\]/, '').trim();
+          }
+
           // Ensure qualifications, experience, department, specialization fields are aligned
           item.qualification = item.qualification || item.degree || '';
           item.degree = item.degree || item.qualification || '';
           item.specialty = item.specialty || item.specialization || '';
           item.specialization = item.specialization || item.specialty || '';
-          item.experience = item.experience || (item.role === 'DOCTOR' ? '10+ Years' : '');
+          if (item.experience === undefined || item.experience === null) {
+            item.experience = item.role === 'DOCTOR' ? '10+ Years' : '';
+          }
           item.registrationNo = item.registrationNo || item.regNo || '';
           item.regNo = item.regNo || item.registrationNo || '';
 
@@ -4530,6 +4552,24 @@ const rawSupabaseService = {
       };
       
       const result = rawSupabaseService.decodeStaffPassword(rawResult);
+      if (updates.experience !== undefined) result.experience = updates.experience;
+      if (updates.registrationNo !== undefined || updates.regNo !== undefined) {
+        result.registrationNo = updates.registrationNo || updates.regNo;
+        result.regNo = result.registrationNo;
+      }
+      if (updates.qualification !== undefined || updates.degree !== undefined) {
+        result.qualification = updates.qualification || updates.degree || result.qualification || result.degree;
+        result.degree = result.qualification;
+      }
+      if (updates.specialty !== undefined || updates.specialization !== undefined) {
+        result.specialty = updates.specialty || updates.specialization;
+        result.specialization = result.specialty;
+      }
+      if (updates.phone !== undefined) result.phone = updates.phone;
+      if (updates.consultationFee !== undefined || updates.consultation_fee !== undefined) {
+        result.consultationFee = updates.consultationFee ?? updates.consultation_fee;
+        result.consultation_fee = result.consultationFee;
+      }
 
       // Sync to local storage
       const updatedList = (Array.isArray(existingList) ? existingList : MOCK_USERS).map((u: any) => {
@@ -4563,6 +4603,24 @@ const rawSupabaseService = {
       };
       const dbPayload = rawSupabaseService.cleanStaffForPostgres(mergedProfile);
       const result = rawSupabaseService.decodeStaffPassword({ ...mergedProfile, ...dbPayload, id, avatar: finalAvatar, avatar_url: finalAvatar });
+      if (updates.experience !== undefined) result.experience = updates.experience;
+      if (updates.registrationNo !== undefined || updates.regNo !== undefined) {
+        result.registrationNo = updates.registrationNo || updates.regNo;
+        result.regNo = result.registrationNo;
+      }
+      if (updates.qualification !== undefined || updates.degree !== undefined) {
+        result.qualification = updates.qualification || updates.degree || result.qualification || result.degree;
+        result.degree = result.qualification;
+      }
+      if (updates.specialty !== undefined || updates.specialization !== undefined) {
+        result.specialty = updates.specialty || updates.specialization;
+        result.specialization = result.specialty;
+      }
+      if (updates.phone !== undefined) result.phone = updates.phone;
+      if (updates.consultationFee !== undefined || updates.consultation_fee !== undefined) {
+        result.consultationFee = updates.consultationFee ?? updates.consultation_fee;
+        result.consultation_fee = result.consultationFee;
+      }
       const updatedList = (Array.isArray(existingList) ? existingList : MOCK_USERS).map((u: any) => {
         const isMatch = u.id === id || u.id === dbId || String(u.id).toLowerCase() === String(id).toLowerCase() || (u.email && updates.email && u.email.toLowerCase() === updates.email.toLowerCase());
         return isMatch ? { ...u, ...result } : u;
