@@ -29,7 +29,8 @@ import {
   generateAppointmentSlipHtml,
   printAppointmentDirect,
   shareAppointmentWhatsApp,
-  getCleanAppointmentDetails
+  getCleanAppointmentDetails,
+  HOSPITAL_CONFIG
 } from '@/lib/appointmentPrint';
 import { formatDate } from '@/lib/utils';
 
@@ -51,6 +52,20 @@ export const AppointmentSlipModal: React.FC<AppointmentSlipModalProps> = ({
   hospitalInfo
 }) => {
   const [format, setFormat] = useState<AppointmentPrintFormat>(initialFormat || defaultFormat);
+
+  const hospitalDisplayName = useMemo(() => {
+    const raw = hospitalInfo?.name || HOSPITAL_CONFIG.name;
+    let clean = String(raw).replace(/\bnew\b/gi, 'NEO');
+    if (!clean.toUpperCase().includes('NEO')) {
+      clean = clean.replace(/gastro\s*plus/gi, 'NEO GASTRO PLUS');
+    }
+    return clean.toUpperCase();
+  }, [hospitalInfo?.name]);
+
+  const hospitalDisplayAddress = useMemo(() => {
+    const raw = hospitalInfo?.address || HOSPITAL_CONFIG.address;
+    return String(raw).replace(/\bnew\b/gi, 'Neo');
+  }, [hospitalInfo?.address]);
 
   const details = useMemo(() => {
     if (!data) return null;
@@ -163,13 +178,13 @@ export const AppointmentSlipModal: React.FC<AppointmentSlipModalProps> = ({
             {/* Hospital Title */}
             <div className="text-center pb-3 border-b border-dashed border-slate-300">
               <div className="text-lg font-black text-teal-950 uppercase tracking-wide">
-                {hospitalInfo?.name || 'NEO GASTRO PLUS HOSPITAL'}
+                {hospitalDisplayName}
               </div>
               <div className="text-[10.5px] text-slate-500 font-medium">
                 {hospitalInfo?.tagline || 'Center for Advanced Gastroenterology, Hepatology & Multispeciality Care'}
               </div>
               <div className="text-[9.5px] text-slate-400 mt-0.5">
-                {hospitalInfo?.address || 'Opp. New Collectorate, Ring Road No. 1, Raipur (C.G.)'} • Ph: {hospitalInfo?.phone || '0771-4002000'}
+                {hospitalDisplayAddress} • Ph: {hospitalInfo?.phone || '0771-4002000'}
               </div>
               <div className="inline-block mt-2 px-2 py-0.5 bg-teal-50 border border-teal-200 text-teal-800 text-[10px] font-black rounded-full uppercase tracking-wider">
                 OPD Consultation Slip

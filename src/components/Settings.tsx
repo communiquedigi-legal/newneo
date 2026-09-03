@@ -671,14 +671,24 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
     }
   };
   // Hospital Info State
-  const [hospitalInfo, setHospitalInfo] = useState(() => storage.get(STORAGE_KEYS.HOSPITAL_INFO, {
-    name: 'Gastro Plus Hospital',
-    address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
-    gst: '27AAAAA0000A1Z5',
-    phone: '9109102145/9109101246',
-    email: 'gatroplusbhopal@gmail.com',
-    logo: null as string | null
-  }));
+  const [hospitalInfo, setHospitalInfo] = useState(() => {
+    const saved = storage.get<any>(STORAGE_KEYS.HOSPITAL_INFO, null);
+    if (saved) {
+      let name = saved.name;
+      if (name && /\bNEW\b/i.test(name)) name = name.replace(/\bNEW\b/gi, 'NEO');
+      let address = saved.address;
+      if (address && /\bNEW\b/i.test(address)) address = address.replace(/\bNEW\b/gi, 'Neo');
+      return { ...saved, name, address };
+    }
+    return {
+      name: 'NEO Gastro Plus Hospital',
+      address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
+      gst: '27AAAAA0000A1Z5',
+      phone: '9109102145/9109101246',
+      email: 'gatroplusbhopal@gmail.com',
+      logo: null as string | null
+    };
+  });
 
   useEffect(() => {
     storage.set(STORAGE_KEYS.HOSPITAL_INFO, hospitalInfo);

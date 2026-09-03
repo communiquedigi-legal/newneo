@@ -996,20 +996,35 @@ function QuickRegisterForm({ currentUser }: { currentUser: UserType | null }) {
 }
 
 export default function App() {
-  const [hospitalInfo, setHospitalInfo] = useState(() => storage.get(STORAGE_KEYS.HOSPITAL_INFO, {
-    name: 'Gastro Plus Hospital',
-    address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
-    gst: '23AAAAA0000A1Z5',
-    phone: '9109102145/9109101246',
-    email: 'gatroplusbhopal@gmail.com',
-    logo: null as string | null
-  }) || {
-    name: 'Gastro Plus Hospital',
-    address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
-    gst: '23AAAAA0000A1Z5',
-    phone: '9109102145/9109101246',
-    email: 'gatroplusbhopal@gmail.com',
-    logo: null
+  const [hospitalInfo, setHospitalInfo] = useState(() => {
+    const saved = storage.get<any>(STORAGE_KEYS.HOSPITAL_INFO, null);
+    if (saved) {
+      let changed = false;
+      let name = saved.name;
+      let address = saved.address;
+      if (name && /\bNEW\b/i.test(name)) {
+        name = name.replace(/\bNEW\b/gi, 'NEO');
+        changed = true;
+      }
+      if (address && /\bNEW\b/i.test(address)) {
+        address = address.replace(/\bNEW\b/gi, 'Neo');
+        changed = true;
+      }
+      if (changed) {
+        const clean = { ...saved, name, address };
+        storage.set(STORAGE_KEYS.HOSPITAL_INFO, clean);
+        return clean;
+      }
+      return saved;
+    }
+    return {
+      name: 'NEO Gastro Plus Hospital',
+      address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
+      gst: '23AAAAA0000A1Z5',
+      phone: '9109102145/9109101246',
+      email: 'gatroplusbhopal@gmail.com',
+      logo: null as string | null
+    };
   });
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -1061,21 +1076,26 @@ export default function App() {
 
   // Load hospital info and perform automatic offline sync on startup
   useEffect(() => {
-    // Ensure hospital info is updated to Gastro Plus Hospital, Bhopal address, email and phone numbers
+    // Ensure hospital info has all instances of NEW replaced by NEO
     try {
-      const currentHosp = storage.get(STORAGE_KEYS.HOSPITAL_INFO, null);
-      if (!currentHosp || !currentHosp.address?.includes('Plot No. 7 & 8') || currentHosp.email !== 'gatroplusbhopal@gmail.com' || !currentHosp.phone?.includes('9109102145') || currentHosp.name?.toUpperCase().includes('NEO GASTRO')) {
-        const updatedHosp = {
-          name: 'Gastro Plus Hospital',
-          address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
-          gst: currentHosp?.gst || '23AAAAA0000A1Z5',
-          phone: '9109102145/9109101246',
-          email: 'gatroplusbhopal@gmail.com',
-          website: 'www.gastroplusbhopal.com',
-          logo: currentHosp?.logo || null
-        };
-        storage.set(STORAGE_KEYS.HOSPITAL_INFO, updatedHosp);
-        setHospitalInfo(updatedHosp);
+      const currentHosp = storage.get<any>(STORAGE_KEYS.HOSPITAL_INFO, null);
+      if (currentHosp) {
+        let changed = false;
+        let name = currentHosp.name;
+        let address = currentHosp.address;
+        if (name && /\bNEW\b/i.test(name)) {
+          name = name.replace(/\bNEW\b/gi, 'NEO');
+          changed = true;
+        }
+        if (address && /\bNEW\b/i.test(address)) {
+          address = address.replace(/\bNEW\b/gi, 'Neo');
+          changed = true;
+        }
+        if (changed) {
+          const updatedHosp = { ...currentHosp, name, address };
+          storage.set(STORAGE_KEYS.HOSPITAL_INFO, updatedHosp);
+          setHospitalInfo(updatedHosp);
+        }
       }
     } catch (err) {
       console.warn('Error upgrading hospital info in storage:', err);
