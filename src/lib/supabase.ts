@@ -241,7 +241,9 @@ syncChannel
 supabase
   .channel('postgres-db-changes')
   .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
-    window.dispatchEvent(new CustomEvent('supabase-data-sync', { detail: payload }));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('supabase-data-sync', { detail: payload }));
+    }
   })
   .subscribe((status) => {
     if (status === 'SUBSCRIBED') {

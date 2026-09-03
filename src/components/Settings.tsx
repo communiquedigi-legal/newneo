@@ -93,6 +93,7 @@ import {
   MOCK_HOSPITAL_BILLING_POLICY
 } from '@/mockData';
 import { storage, STORAGE_KEYS } from '@/lib/storage';
+import { useDataSync } from '@/hooks/useDataSync';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { getPrescriptionPrintHtml } from '@/lib/prescriptionPrint';
 import { triggerRxPrintPreview } from '@/components/RxPrintPreviewModal';
@@ -816,13 +817,22 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
   };
 
   // User Management
-  const [users, setUsers] = useState(() => storage.get(STORAGE_KEYS.USERS, MOCK_USERS));
+  const [users, setUsers] = useState<any[]>(() => storage.get(STORAGE_KEYS.USERS, MOCK_USERS));
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [newUser, setNewUser] = useState({ name: '', email: '', role: 'DOCTOR', department: '', password: '', registrationNo: '', labLicenseNo: '' });
 
-  useEffect(() => {
-    storage.set(STORAGE_KEYS.USERS, users);
-  }, [users]);
+  const fetchUsers = async () => {
+    try {
+      const dbUsers = await supabaseService.getStaff();
+      if (dbUsers && Array.isArray(dbUsers) && dbUsers.length > 0) {
+        setUsers(dbUsers);
+      }
+    } catch (e) {
+      console.warn('Failed to refresh users in settings:', e);
+    }
+  };
+
+  useDataSync(fetchUsers);
 
   // Rates State
   const [bedRates, setBedRates] = useState(() => storage.get(STORAGE_KEYS.BED_RATES, MOCK_BED_RATES));
@@ -1153,29 +1163,30 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
         updates.password = newUser.password;
       }
       
-      await supabaseService.updateStaff(editingUserId, updates);
+      const result = await supabaseService.updateStaff(editingUserId, updates);
       
-      const updatedUsers = users.map((u: any) => {
+      setUsers(prev => prev.map((u: any) => {
         if (u.id === editingUserId) {
           return {
             ...u,
-            ...updates
+            ...updates,
+            ...(result || {})
           };
         }
         return u;
-      });
-      setUsers(updatedUsers);
+      }));
       setEditingUserId(null);
       
       // If we're updating the current user, sync the app state
       if (editingUserId === currentUser?.id) {
-        const updatedUser = updatedUsers.find((u: any) => u.id === editingUserId);
-        if (onUserUpdate && updatedUser) {
+        const updatedUser = { ...currentUser, ...updates, ...(result || {}) };
+        if (onUserUpdate) {
           onUserUpdate(updatedUser);
         }
       }
       
       toast.success('User account updated successfully');
+      fetchUsers();
     } else {
       // Add new user
       const staffToAdd = {
@@ -1194,8 +1205,9 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
       
       const result = await supabaseService.createStaff(staffToAdd);
       if (result) {
-        setUsers([...users, result]);
+        setUsers(prev => [result, ...prev.filter(u => u.id !== result.id)]);
         toast.success(`${newUser.role} account created successfully`);
+        fetchUsers();
       } else {
         toast.error('Failed to create account in database');
       }
@@ -2545,8 +2557,9 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
                           if (confirm('Are you sure you want to delete this user?')) {
                             const success = await supabaseService.deleteStaff(user.id);
                             if (success) {
-                              setUsers(users.filter((u: any) => u.id !== user.id));
+                              setUsers(prev => prev.filter((u: any) => u.id !== user.id));
                               toast.success('User account removed');
+                              fetchUsers();
                             } else {
                               toast.error('Failed to remove user account');
                             }

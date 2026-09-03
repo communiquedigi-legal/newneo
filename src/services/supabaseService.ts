@@ -4219,9 +4219,33 @@ const rawSupabaseService = {
         return false;
       };
 
-      // Decoded arrays
-      const decodedStaff = decodeHelper((sData || []).filter(s => !isPlaceholderProfile(s) && !isDeleted(s)));
-      const decodedProfiles = decodeHelper((pData || []).filter(p => !isPlaceholderProfile(p) && !isDeleted(p)));
+      // Extract and mark any deleted/inactive staff from database so all devices across Vercel sync deletion state
+      const dbAll = [...(sData || []), ...(pData || [])];
+      dbAll.forEach((item: any) => {
+        if (item && (item.status === 'DELETED' || item.status === 'INACTIVE')) {
+          markStaffDeleted(item.id, item.email);
+        }
+      });
+
+      // Decoded arrays (excluding deleted and placeholder)
+      const decodedStaff = decodeHelper((sData || []).filter(s => !isPlaceholderProfile(s) && !isDeleted(s) && s.status !== 'DELETED' && s.status !== 'INACTIVE'));
+      const decodedProfiles = decodeHelper((pData || []).filter(p => !isPlaceholderProfile(p) && !isDeleted(p) && p.status !== 'DELETED' && p.status !== 'INACTIVE'));
+
+      // If Supabase has zero active staff or profiles, seed initial mock staff into Supabase once so it acts as cloud source of truth
+      if (decodedStaff.length === 0 && decodedProfiles.length === 0 && sData && !sError) {
+        const activeMocks = MOCK_USERS.filter(u => !isDeleted(u));
+        setTimeout(async () => {
+          for (const mock of activeMocks) {
+            try {
+              const payload = rawSupabaseService.cleanStaffForPostgres(mock);
+              await supabase.from('staff').upsert([payload], { onConflict: 'id' });
+              await supabase.from('profiles').upsert([payload], { onConflict: 'id' });
+            } catch (e) {
+              // background seed attempt
+            }
+          }
+        }, 50);
+      }
 
       // Merge maps by normalized ID and email to prevent duplication
       const mergedMap = new Map<string, any>();
@@ -4244,7 +4268,7 @@ const rawSupabaseService = {
         mergedMap.set(targetKey, merged);
       };
 
-      // 1. Seed base default doctors & hospital staff (excluding any deleted)
+      // 1. Seed base default doctors & hospital staff (only if not deleted)
       MOCK_USERS.filter(u => !isDeleted(u)).forEach(u => {
         setOrMerge(u);
       });
@@ -4262,7 +4286,7 @@ const rawSupabaseService = {
         setOrMerge(p);
       });
 
-      // 4. Merge staff table entries (highest precedence)
+      // 4. Merge staff table entries (highest precedence from database)
       decodedStaff.forEach(s => {
         setOrMerge(s);
       });
@@ -4291,6 +4315,7 @@ const rawSupabaseService = {
       const local = storage.get(STORAGE_KEYS.USERS, MOCK_USERS);
       const filtered = (Array.isArray(local) ? local : MOCK_USERS).filter((u: any) => {
         if (!u) return false;
+        if (u.status === 'DELETED' || u.status === 'INACTIVE') return false;
         const uId = String(u.id || '').toLowerCase().trim();
         const uDet = toDeterministicUuid(u.id)?.toLowerCase().trim();
         const uEmail = String(u.email || '').toLowerCase().trim();
@@ -4305,9 +4330,26 @@ const rawSupabaseService = {
       unmarkStaffDeleted(profile.id, profile.email);
       const dbPayload = rawSupabaseService.cleanStaffForPostgres(profile);
       
+      // If a user with this email already exists in the database, reuse their ID to avoid unique constraint conflict
+      const checkEmail = dbPayload.email ? String(dbPayload.email).trim().toLowerCase() : '';
+      if (checkEmail) {
+        try {
+          const { data: existingStaff } = await supabase
+            .from('staff')
+            .select('id')
+            .ilike('email', checkEmail)
+            .maybeSingle();
+          if (existingStaff?.id) {
+            dbPayload.id = existingStaff.id;
+          }
+        } catch (e) {
+          // ignore lookup failure
+        }
+      }
+
       let created: any = null;
 
-      // 1. Try upserting into staff table
+      // 1. Upsert into staff table
       const { data: sData, error: sError } = await supabase
         .from('staff')
         .upsert([dbPayload], { onConflict: 'id' })
@@ -4331,7 +4373,8 @@ const rawSupabaseService = {
           phone: dbPayload.phone,
           degree: dbPayload.degree,
           specialization: dbPayload.specialization,
-          avatar_url: dbPayload.avatar_url
+          avatar_url: dbPayload.avatar_url,
+          status: 'ACTIVE'
         };
         const { data: altData } = await supabase.from('staff').insert([leanPayload]).select();
         created = altData && altData[0];
@@ -4353,7 +4396,7 @@ const rawSupabaseService = {
 
       // Sync to local storage
       const existing = storage.get(STORAGE_KEYS.USERS, MOCK_USERS);
-      const filtered = existing.filter((u: any) => u.id !== result.id && u.email?.toLowerCase() !== result.email?.toLowerCase());
+      const filtered = existing.filter((u: any) => u.id !== result.id && (!result.email || u.email?.toLowerCase() !== result.email?.toLowerCase()));
       storage.set(STORAGE_KEYS.USERS, [result, ...filtered]);
       
       broadcastDataMutation('staff', 'insert');
@@ -4370,7 +4413,7 @@ const rawSupabaseService = {
         avatar: dbPayload.avatar_url
       });
       const existing = storage.get(STORAGE_KEYS.USERS, MOCK_USERS);
-      const filtered = existing.filter((u: any) => u.id !== result.id && u.email?.toLowerCase() !== result.email?.toLowerCase());
+      const filtered = existing.filter((u: any) => u.id !== result.id && (!result.email || u.email?.toLowerCase() !== result.email?.toLowerCase()));
       storage.set(STORAGE_KEYS.USERS, [result, ...filtered]);
       broadcastDataMutation('staff', 'insert');
       broadcastDataMutation('profiles', 'insert');
@@ -4385,17 +4428,65 @@ const rawSupabaseService = {
       const dbPayload = rawSupabaseService.cleanStaffForPostgres({ ...updates, id: dbId });
       delete dbPayload.id; // avoid updating primary key column
 
-      const { data: sData } = await supabase
+      const normEmail = updates.email ? String(updates.email).trim().toLowerCase() : '';
+
+      // 1. Update in staff table
+      let { data: sData } = await supabase
         .from('staff')
         .update(dbPayload)
         .eq('id', dbId)
         .select();
 
-      const { data: pData } = await supabase
+      // If 0 rows updated by id and we have an email, try updating by email
+      if ((!sData || sData.length === 0) && normEmail) {
+        const { data: sDataEmail } = await supabase
+          .from('staff')
+          .update(dbPayload)
+          .ilike('email', normEmail)
+          .select();
+        if (sDataEmail && sDataEmail.length > 0) {
+          sData = sDataEmail;
+        }
+      }
+
+      // If still 0 rows, upsert into staff so the record is guaranteed to exist in Supabase
+      if (!sData || sData.length === 0) {
+        const { data: sDataUpsert } = await supabase
+          .from('staff')
+          .upsert([{ ...dbPayload, id: dbId }], { onConflict: 'id' })
+          .select();
+        if (sDataUpsert && sDataUpsert.length > 0) {
+          sData = sDataUpsert;
+        }
+      }
+
+      // 2. Update in profiles table
+      let { data: pData } = await supabase
         .from('profiles')
         .update(dbPayload)
         .eq('id', dbId)
         .select();
+
+      if ((!pData || pData.length === 0) && normEmail) {
+        const { data: pDataEmail } = await supabase
+          .from('profiles')
+          .update(dbPayload)
+          .ilike('email', normEmail)
+          .select();
+        if (pDataEmail && pDataEmail.length > 0) {
+          pData = pDataEmail;
+        }
+      }
+
+      if (!pData || pData.length === 0) {
+        const { data: pDataUpsert } = await supabase
+          .from('profiles')
+          .upsert([{ ...dbPayload, id: dbId }], { onConflict: 'id' })
+          .select();
+        if (pDataUpsert && pDataUpsert.length > 0) {
+          pData = pDataUpsert;
+        }
+      }
 
       const updated = (sData && sData[0]) || (pData && pData[0]);
       
@@ -4415,7 +4506,7 @@ const rawSupabaseService = {
       // Sync to local storage
       const existing = storage.get(STORAGE_KEYS.USERS, MOCK_USERS);
       const updatedList = existing.map((u: any) => {
-        const isMatch = u.id === id || u.id === dbId || String(u.id).toLowerCase() === String(id).toLowerCase() || (u.email && updates.email && u.email.toLowerCase() === updates.email.toLowerCase());
+        const isMatch = u.id === id || u.id === dbId || String(u.id).toLowerCase() === String(id).toLowerCase() || (u.email && normEmail && u.email.toLowerCase() === normEmail);
         return isMatch ? { ...u, ...result } : u;
       });
       storage.set(STORAGE_KEYS.USERS, updatedList);
@@ -4447,23 +4538,80 @@ const rawSupabaseService = {
       const dbId = isUuid(id) ? id : toDeterministicUuid(id);
       const existingList = storage.get(STORAGE_KEYS.USERS, MOCK_USERS);
       const target = existingList.find((u: any) => u.id === id || u.id === dbId || String(u.id).toLowerCase() === String(id).toLowerCase());
-      
-      markStaffDeleted(id, target?.email);
+      const targetEmail = target?.email ? String(target.email).trim().toLowerCase() : '';
+
+      markStaffDeleted(id, targetEmail);
       if (dbId) markStaffDeleted(dbId);
 
-      await supabase
-        .from('staff')
-        .delete()
-        .or(`id.eq.${dbId},id.eq.${id}`);
+      // 1. Soft-delete across Supabase so any query from any device immediately knows this staff member is deleted
+      try {
+        await supabase
+          .from('staff')
+          .update({ status: 'DELETED', updated_at: new Date().toISOString() })
+          .eq('id', dbId);
+        if (targetEmail) {
+          await supabase
+            .from('staff')
+            .update({ status: 'DELETED', updated_at: new Date().toISOString() })
+            .ilike('email', targetEmail);
+        }
+      } catch (e) {
+        // ignore soft delete failure
+      }
 
-      await supabase
-        .from('profiles')
-        .delete()
-        .or(`id.eq.${dbId},id.eq.${id}`);
+      try {
+        await supabase
+          .from('profiles')
+          .update({ status: 'DELETED', updated_at: new Date().toISOString() })
+          .eq('id', dbId);
+        if (targetEmail) {
+          await supabase
+            .from('profiles')
+            .update({ status: 'DELETED', updated_at: new Date().toISOString() })
+            .ilike('email', targetEmail);
+        }
+      } catch (e) {
+        // ignore soft delete failure
+      }
+
+      // 2. Attempt hard delete
+      try {
+        await supabase
+          .from('staff')
+          .delete()
+          .eq('id', dbId);
+        if (targetEmail) {
+          await supabase
+            .from('staff')
+            .delete()
+            .ilike('email', targetEmail);
+        }
+      } catch (e) {
+        // ignore hard delete failure
+      }
+
+      try {
+        await supabase
+          .from('profiles')
+          .delete()
+          .eq('id', dbId);
+        if (targetEmail) {
+          await supabase
+            .from('profiles')
+            .delete()
+            .ilike('email', targetEmail);
+        }
+      } catch (e) {
+        // ignore foreign key constraint rejection; soft delete already marks it
+      }
 
       // Sync to local storage
       const filtered = existingList.filter((u: any) => {
-        const isMatch = u.id === id || u.id === dbId || String(u.id).toLowerCase() === String(id).toLowerCase() || (target?.email && u.email && u.email.toLowerCase() === target.email.toLowerCase());
+        const uId = String(u.id || '').toLowerCase();
+        const uEmail = String(u.email || '').toLowerCase();
+        const isMatch = uId === String(id).toLowerCase() || 
+                        uId === String(dbId).toLowerCase() || 
+                        (targetEmail && uEmail === targetEmail);
         return !isMatch;
       });
       storage.set(STORAGE_KEYS.USERS, filtered);
@@ -4477,10 +4625,17 @@ const rawSupabaseService = {
       const dbId = isUuid(id) ? id : toDeterministicUuid(id);
       const existingList = storage.get(STORAGE_KEYS.USERS, MOCK_USERS);
       const target = existingList.find((u: any) => u.id === id || u.id === dbId);
-      markStaffDeleted(id, target?.email);
+      const targetEmail = target?.email ? String(target.email).trim().toLowerCase() : '';
+      markStaffDeleted(id, targetEmail);
       if (dbId) markStaffDeleted(dbId);
 
-      const filtered = existingList.filter((u: any) => u.id !== id && u.id !== dbId);
+      const filtered = existingList.filter((u: any) => {
+        const uId = String(u.id || '').toLowerCase();
+        const uEmail = String(u.email || '').toLowerCase();
+        return uId !== String(id).toLowerCase() && 
+               uId !== String(dbId).toLowerCase() && 
+               (!targetEmail || uEmail !== targetEmail);
+      });
       storage.set(STORAGE_KEYS.USERS, filtered);
       broadcastDataMutation('staff', 'delete');
       broadcastDataMutation('profiles', 'delete');
@@ -7943,8 +8098,9 @@ for (const [key, value] of Object.entries(rawSupabaseService)) {
     if (isMutation) {
       syncWrappedService[key] = async function(...args: any[]) {
         const firstArg = args[0];
-        let isOfflineId = typeof firstArg === 'string' && !isUuid(firstArg);
-        if (!isOfflineId && firstArg && typeof firstArg === 'object') {
+        const isStaffOp = key.toLowerCase().includes('staff') || key.toLowerCase().includes('profile') || key.toLowerCase().includes('user');
+        let isOfflineId = !isStaffOp && typeof firstArg === 'string' && !isUuid(firstArg);
+        if (!isStaffOp && !isOfflineId && firstArg && typeof firstArg === 'object') {
           const checkId = firstArg.id || firstArg.patient_id || firstArg.patientId;
           if (typeof checkId === 'string' && checkId !== '' && !isUuid(checkId)) {
             isOfflineId = true;
@@ -8045,8 +8201,8 @@ for (const [key, value] of Object.entries(rawSupabaseService)) {
           if (finalResult) {
             if (config) {
               const cached = storage.get(config.storageKey, []);
-              if (Array.isArray(cached) && Array.isArray(finalResult)) {
-                const deletedStaffSet = key === 'getStaff' ? getDeletedStaffSet() : null;
+              if (Array.isArray(cached) && Array.isArray(finalResult) && key !== 'getStaff') {
+                const deletedStaffSet = null;
                 const offlineItems = cached.filter((item: any) => {
                   if (!item || !item.id) return false;
                   if (deletedStaffSet) {
