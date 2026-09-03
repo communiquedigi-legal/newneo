@@ -230,7 +230,7 @@ export function generateAppointmentSlipHtml(data: AppointmentSlipData, format: A
     }
   </style>
 </head>
-<body onload="window.print();">
+<body>
   <div class="header">
     <div class="hosp-title">${HOSPITAL_CONFIG.name}</div>
     <div class="hosp-sub">${HOSPITAL_CONFIG.tagline}</div>
@@ -615,7 +615,7 @@ export function generateAppointmentSlipHtml(data: AppointmentSlipData, format: A
     }
   </style>
 </head>
-<body onload="window.print();">
+<body>
   <div class="slip-container">
     <div>
       <!-- Hospital Header -->

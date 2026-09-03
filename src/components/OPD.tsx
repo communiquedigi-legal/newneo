@@ -126,6 +126,7 @@ import {
   AppointmentSlipData, 
   AppointmentPrintFormat 
 } from '@/lib/appointmentPrint';
+import { printHTML } from '@/lib/printHelper';
 
 const isPatientIdMatch = (id1: any, id2: any): boolean => {
   if (!id1 || !id2) return false;
@@ -251,83 +252,16 @@ const getLocalDateString = () => {
   return `${year}-${month}-${day}`;
 };
 
-const safePrint = (htmlContent: string, width = 800, height = 1000) => {
+const safePrint = (htmlContent: string, width = 800, _height = 1000) => {
   // Only route actual prescriptions or clinical Rx documents to the Rx Print Preview Modal
   if (htmlContent.includes('Prescription') || htmlContent.includes('Rx Header') || (width >= 700 && htmlContent.includes('Rx'))) {
     triggerRxPrintPreview(htmlContent);
     return true;
   }
 
-  // Fallback for small slip printing (like token tickets)
-  try {
-    let iframe = document.getElementById('print-iframe') as HTMLIFrameElement;
-    if (!iframe) {
-      iframe = document.createElement('iframe');
-      iframe.id = 'print-iframe';
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
-      iframe.style.border = '0';
-      iframe.style.zIndex = '-9999';
-      document.body.appendChild(iframe);
-    }
-    const doc = iframe.contentWindow?.document || iframe.contentDocument;
-    if (doc) {
-      doc.open();
-      const cleanHtml = htmlContent.replace(/window\.close\(\)/g, '');
-      doc.write(cleanHtml);
-      doc.close();
-      setTimeout(() => {
-        try {
-          iframe.contentWindow?.focus();
-          iframe.contentWindow?.print();
-        } catch (printErr) {
-          console.error('Iframe print failed, falling back to popup window:', printErr);
-          fallbackToPopup(htmlContent, width, height);
-        }
-      }, 500);
-      return true;
-    }
-  } catch (iframeErr) {
-    console.error('Hidden iframe printing setup failed, falling back to popup window:', iframeErr);
-  }
-
-  return fallbackToPopup(htmlContent, width, height);
-};
-
-const fallbackToPopup = (htmlContent: string, width = 800, height = 1000) => {
-  let printWindow: Window | null = null;
-  try {
-    printWindow = window.open('', '_blank', `width=${width},height=${height}`);
-  } catch (e) {
-    console.error('Failed to open popup window for printing:', e);
-  }
-
-  if (printWindow) {
-    try {
-      printWindow.document.open();
-      printWindow.document.write(htmlContent);
-      printWindow.document.close();
-      
-      // Explicitly trigger focus and print on the new window to be safe
-      setTimeout(() => {
-        try {
-          printWindow?.focus();
-          printWindow?.print();
-        } catch (printErr) {
-          console.error('Failed to trigger print on popup window:', printErr);
-        }
-      }, 500);
-      return true;
-    } catch (err) {
-      console.error('Failed to write to print window:', err);
-    }
-  }
-
-  toast.error('Printing failed. Please allow popups or open this page in a new tab.');
-  return false;
+  // Slips, tokens, and small receipts: use reliable unified printHTML (handles popup/iframe fallback, cancel, and auto-close)
+  printHTML(htmlContent);
+  return true;
 };
 
 export const COMMON_MEDICINES_CATALOG = [
