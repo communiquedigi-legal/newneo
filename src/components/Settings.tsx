@@ -606,10 +606,29 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
   };
 
   // Profile State
+  const isDoctorOrSurgeon = (role: string) => {
+    const r = (role || '').toUpperCase();
+    return r.includes('DOCTOR') || r.includes('SURGEON');
+  };
+
+  const isLabOrPharmacy = (role: string) => {
+    const r = (role || '').toUpperCase();
+    return r.includes('LAB') || r.includes('PHARM');
+  };
+
   const [profileData, setProfileData] = useState({
     name: currentUser?.name || '',
     email: currentUser?.email || '',
     phone: currentUser?.phone || '+91 98765 43210',
+    department: currentUser?.department || '',
+    specialty: currentUser?.specialty || currentUser?.specialization || '',
+    degree: currentUser?.degree || currentUser?.qualification || '',
+    experience: currentUser?.experience || '',
+    registrationNo: currentUser?.registrationNo || currentUser?.regNo || '',
+    consultationFee: currentUser?.consultationFee !== undefined && currentUser?.consultationFee !== null 
+      ? String(currentUser.consultationFee) 
+      : (currentUser?.consultation_fee !== undefined && currentUser?.consultation_fee !== null ? String(currentUser.consultation_fee) : ''),
+    labLicenseNo: currentUser?.labLicenseNo || currentUser?.licenseNumber || '',
     password: currentUser?.password || '',
     avatar: currentUser?.avatar || currentUser?.avatar_url || ''
   });
@@ -620,6 +639,15 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
         name: currentUser.name || '',
         email: currentUser.email || '',
         phone: currentUser.phone || '+91 98765 43210',
+        department: currentUser.department || '',
+        specialty: currentUser.specialty || currentUser.specialization || '',
+        degree: currentUser.degree || currentUser.qualification || '',
+        experience: currentUser.experience || '',
+        registrationNo: currentUser.registrationNo || currentUser.regNo || '',
+        consultationFee: currentUser.consultationFee !== undefined && currentUser.consultationFee !== null 
+          ? String(currentUser.consultationFee) 
+          : (currentUser.consultation_fee !== undefined && currentUser.consultation_fee !== null ? String(currentUser.consultation_fee) : ''),
+        labLicenseNo: currentUser.labLicenseNo || currentUser.licenseNumber || '',
         password: currentUser.password || '',
         avatar: currentUser.avatar || currentUser.avatar_url || ''
       });
@@ -629,9 +657,24 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
   const handleUpdateProfile = async () => {
     if (onUserUpdate && currentUser) {
       const finalAvatar = profileData.avatar || currentUser.avatar || currentUser.avatar_url;
+      const feeNum = profileData.consultationFee !== '' && !isNaN(Number(profileData.consultationFee))
+        ? Number(profileData.consultationFee)
+        : (Number(currentUser.consultationFee) || 0);
+
       const updatedUser = { 
         ...currentUser, 
         ...profileData,
+        specialization: profileData.specialty || currentUser.specialization || 'General',
+        specialty: profileData.specialty || currentUser.specialty || 'General',
+        degree: profileData.degree || currentUser.degree || '',
+        qualification: profileData.degree || currentUser.qualification || '',
+        experience: profileData.experience || currentUser.experience || '',
+        registrationNo: profileData.registrationNo || currentUser.registrationNo || '',
+        regNo: profileData.registrationNo || currentUser.regNo || '',
+        consultationFee: feeNum,
+        consultation_fee: feeNum,
+        labLicenseNo: profileData.labLicenseNo || currentUser.labLicenseNo || '',
+        licenseNumber: profileData.labLicenseNo || currentUser.licenseNumber || '',
         avatar: finalAvatar,
         avatar_url: finalAvatar
       };
@@ -1940,14 +1983,76 @@ export default function Settings({ currentUser, onUserUpdate, onHospitalUpdate }
                   <div className="space-y-2">
                     <Label>Phone Number</Label>
                     <Input 
+                      placeholder="+91 98765 43210"
                       value={profileData.phone || ''} 
                       onChange={(e) => setProfileData({...profileData, phone: e.target.value})} 
                     />
                   </div>
                   <div className="space-y-2">
                     <Label>Role</Label>
-                    <Input value={currentUser?.role?.replace('_', ' ') || ''} disabled className="bg-slate-50" />
+                    <Input value={currentUser?.role?.replace('_', ' ') || ''} disabled className="bg-slate-50 font-medium" />
                   </div>
+                  <div className="space-y-2">
+                    <Label>Department</Label>
+                    <Input 
+                      placeholder="e.g. Gastroenterology / Surgery"
+                      value={profileData.department || ''} 
+                      onChange={(e) => setProfileData({...profileData, department: e.target.value})} 
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Specialty / Specialization</Label>
+                    <Input 
+                      placeholder="e.g. Consultant Gastroenterologist & Endoscopist"
+                      value={profileData.specialty || ''} 
+                      onChange={(e) => setProfileData({...profileData, specialty: e.target.value})} 
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Degree / Qualification</Label>
+                    <Input 
+                      placeholder="e.g. MBBS, MD, DNB (Gastroenterology)"
+                      value={profileData.degree || ''} 
+                      onChange={(e) => setProfileData({...profileData, degree: e.target.value})} 
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Experience</Label>
+                    <Input 
+                      placeholder="e.g. 12 Years / 15+ Years"
+                      value={profileData.experience || ''} 
+                      onChange={(e) => setProfileData({...profileData, experience: e.target.value})} 
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Registration Number</Label>
+                    <Input 
+                      placeholder="e.g. MCI-2014-9912"
+                      value={profileData.registrationNo || ''} 
+                      onChange={(e) => setProfileData({...profileData, registrationNo: e.target.value})} 
+                    />
+                  </div>
+                  {isDoctorOrSurgeon(currentUser?.role || '') && (
+                    <div className="space-y-2">
+                      <Label>Consultation Fee (₹)</Label>
+                      <Input 
+                        type="number"
+                        placeholder="e.g. 500"
+                        value={profileData.consultationFee || ''} 
+                        onChange={(e) => setProfileData({...profileData, consultationFee: e.target.value})} 
+                      />
+                    </div>
+                  )}
+                  {isLabOrPharmacy(currentUser?.role || '') && (
+                    <div className="space-y-2">
+                      <Label>License Number</Label>
+                      <Input 
+                        placeholder="e.g. LAB-LIC-9988 / DL-PHARM-12345"
+                        value={profileData.labLicenseNo || ''} 
+                        onChange={(e) => setProfileData({...profileData, labLicenseNo: e.target.value})} 
+                      />
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label>My Password</Label>
                     <Input 

@@ -4269,24 +4269,37 @@ const rawSupabaseService = {
         }, 50);
       }
 
-      // Merge maps by normalized ID and email to prevent duplication
+      // Merge maps by normalized ID, email, and name to prevent duplication
       const mergedMap = new Map<string, any>();
       const emailToKeyMap = new Map<string, string>();
+      const nameToKeyMap = new Map<string, string>();
 
       const setOrMerge = (member: any) => {
         if (!member || !member.name || isPlaceholderProfile(member) || isDeleted(member)) return;
         const normId = String(member.id).toLowerCase();
         const normEmail = String(member.email || '').toLowerCase().trim();
+        const normName = String(member.name || '').toLowerCase().replace(/^(dr|sister|mr|ms|mrs)\.?\s+/i, '').trim();
         
         let targetKey = normId;
         if (normEmail && emailToKeyMap.has(normEmail)) {
           targetKey = emailToKeyMap.get(normEmail)!;
+        } else if (normName && nameToKeyMap.has(normName)) {
+          targetKey = nameToKeyMap.get(normName)!;
         } else {
-          emailToKeyMap.set(normEmail, targetKey);
+          if (normEmail) emailToKeyMap.set(normEmail, targetKey);
+          if (normName) nameToKeyMap.set(normName, targetKey);
         }
 
         const existing = mergedMap.get(targetKey) || {};
-        const merged = { ...existing, ...member };
+        const merged: any = { ...existing };
+        for (const [k, v] of Object.entries(member)) {
+          // Do not overwrite existing non-empty values with blank/N/A
+          if (v !== undefined && v !== null && v !== '' && v !== 'N/A') {
+            merged[k] = v;
+          } else if (merged[k] === undefined || merged[k] === null) {
+            merged[k] = v;
+          }
+        }
         mergedMap.set(targetKey, merged);
       };
 
@@ -4295,23 +4308,23 @@ const rawSupabaseService = {
         setOrMerge(u);
       });
 
-      // 2. Merge local storage users if any exist (excluding any deleted)
+      // 2. Merge profiles from database
+      decodedProfiles.forEach(p => {
+        setOrMerge(p);
+      });
+
+      // 3. Merge staff table entries from database
+      decodedStaff.forEach(s => {
+        setOrMerge(s);
+      });
+
+      // 4. Merge local storage users (top precedence to preserve recent user profile updates)
       const localUsers = storage.get(STORAGE_KEYS.USERS, []);
       if (Array.isArray(localUsers)) {
         localUsers.filter(u => !isPlaceholderProfile(u) && !isDeleted(u)).forEach(u => {
           setOrMerge(u);
         });
       }
-
-      // 3. Merge profiles
-      decodedProfiles.forEach(p => {
-        setOrMerge(p);
-      });
-
-      // 4. Merge staff table entries (highest precedence from database)
-      decodedStaff.forEach(s => {
-        setOrMerge(s);
-      });
 
       // Filter and deduplicate
       const uniqueList: any[] = [];
@@ -4475,12 +4488,35 @@ const rawSupabaseService = {
 
       const normEmail = (updates.email || targetUser.email) ? String(updates.email || targetUser.email).trim().toLowerCase() : '';
 
+      const leanPayload: any = {
+        name: dbPayload.name,
+        email: dbPayload.email,
+        role: dbPayload.role,
+        department: dbPayload.department,
+        designation: dbPayload.designation,
+        phone: dbPayload.phone,
+        degree: dbPayload.degree,
+        specialization: dbPayload.specialization,
+        avatar_url: dbPayload.avatar_url,
+        status: dbPayload.status || 'ACTIVE'
+      };
+
       // 1. Update in staff table
       let { data: sData } = await supabase
         .from('staff')
         .update(dbPayload)
         .eq('id', dbId)
         .select();
+
+      if (!sData || sData.length === 0) {
+        // Try lean payload update on staff
+        const { data: sDataLean } = await supabase
+          .from('staff')
+          .update(leanPayload)
+          .eq('id', dbId)
+          .select();
+        if (sDataLean && sDataLean.length > 0) sData = sDataLean;
+      }
 
       // If 0 rows updated by id and we have an email, try updating by email
       if ((!sData || sData.length === 0) && normEmail) {
@@ -4491,6 +4527,13 @@ const rawSupabaseService = {
           .select();
         if (sDataEmail && sDataEmail.length > 0) {
           sData = sDataEmail;
+        } else {
+          const { data: sDataEmailLean } = await supabase
+            .from('staff')
+            .update(leanPayload)
+            .ilike('email', normEmail)
+            .select();
+          if (sDataEmailLean && sDataEmailLean.length > 0) sData = sDataEmailLean;
         }
       }
 
@@ -4502,6 +4545,12 @@ const rawSupabaseService = {
           .select();
         if (sDataUpsert && sDataUpsert.length > 0) {
           sData = sDataUpsert;
+        } else {
+          const { data: sDataUpsertLean } = await supabase
+            .from('staff')
+            .upsert([{ ...leanPayload, id: dbId }], { onConflict: 'id' })
+            .select();
+          if (sDataUpsertLean && sDataUpsertLean.length > 0) sData = sDataUpsertLean;
         }
       }
 
@@ -4512,6 +4561,15 @@ const rawSupabaseService = {
         .eq('id', dbId)
         .select();
 
+      if (!pData || pData.length === 0) {
+        const { data: pDataLean } = await supabase
+          .from('profiles')
+          .update(leanPayload)
+          .eq('id', dbId)
+          .select();
+        if (pDataLean && pDataLean.length > 0) pData = pDataLean;
+      }
+
       if ((!pData || pData.length === 0) && normEmail) {
         const { data: pDataEmail } = await supabase
           .from('profiles')
@@ -4520,6 +4578,13 @@ const rawSupabaseService = {
           .select();
         if (pDataEmail && pDataEmail.length > 0) {
           pData = pDataEmail;
+        } else {
+          const { data: pDataEmailLean } = await supabase
+            .from('profiles')
+            .update(leanPayload)
+            .ilike('email', normEmail)
+            .select();
+          if (pDataEmailLean && pDataEmailLean.length > 0) pData = pDataEmailLean;
         }
       }
 
@@ -4530,6 +4595,12 @@ const rawSupabaseService = {
           .select();
         if (pDataUpsert && pDataUpsert.length > 0) {
           pData = pDataUpsert;
+        } else {
+          const { data: pDataUpsertLean } = await supabase
+            .from('profiles')
+            .upsert([{ ...leanPayload, id: dbId }], { onConflict: 'id' })
+            .select();
+          if (pDataUpsertLean && pDataUpsertLean.length > 0) pData = pDataUpsertLean;
         }
       }
 
