@@ -243,8 +243,8 @@ export function EndoscopyProcedureModule() {
 
   // Pricing & Billing State
   const [baseFee, setBaseFee] = useState<number>(0);
-  const [sedationFee, setSedationFee] = useState<number>(0);
-  const [kitFee, setKitFee] = useState<number>(0);
+  const [sedationFee, setSedationFee] = useState<number | string>(0);
+  const [kitFee, setKitFee] = useState<number | string>(0);
   const [discountAmount, setDiscountAmount] = useState<number>(0);
   const [paymentMode, setPaymentMode] = useState<DirectEndoscopyProcedure['paymentMode']>('UPI / QR');
   const [transactionRef, setTransactionRef] = useState('');
@@ -320,8 +320,9 @@ export function EndoscopyProcedureModule() {
     const card = rateCard[formProcedureType] || DEFAULT_PROCEDURE_RATE_CARD[formProcedureType];
     if (card) {
       setBaseFee(card.baseFee);
-      setSedationFee(card.sedationFee);
-      setKitFee(card.kitFee);
+      // Default Sedation Fee and Biopsy Pack Fee to 0 as requested
+      setSedationFee(0);
+      setKitFee(0);
     }
   }, [formProcedureType, rateCard]);
 
@@ -338,7 +339,10 @@ export function EndoscopyProcedureModule() {
     }
   };
 
-  const netTotalAmount = Math.max(0, (baseFee + sedationFee + kitFee) - discountAmount);
+  const numSedation = typeof sedationFee === 'number' ? sedationFee : (parseFloat(sedationFee as string) || 0);
+  const numKit = typeof kitFee === 'number' ? kitFee : (parseFloat(kitFee as string) || 0);
+  const numDiscount = typeof discountAmount === 'number' ? discountAmount : (parseFloat(discountAmount as any) || 0);
+  const netTotalAmount = Math.max(0, (baseFee + numSedation + numKit) - numDiscount);
 
   const saveProceduresToStorage = (updated: DirectEndoscopyProcedure[]) => {
     setProcedures(updated);
@@ -384,9 +388,9 @@ export function EndoscopyProcedureModule() {
       billingStatus: 'PAID',
       invoiceId: invoiceId,
       procedureFee: baseFee,
-      sedationFee: sedationFee,
-      biopsyKitFee: kitFee,
-      discountAmount: discountAmount,
+      sedationFee: numSedation,
+      biopsyKitFee: numKit,
+      discountAmount: numDiscount,
       totalAmount: netTotalAmount,
       amountPaid: netTotalAmount,
       paymentMode: paymentMode,
@@ -410,11 +414,11 @@ export function EndoscopyProcedureModule() {
       date: new Date().toISOString(),
       items: [
         { description: `Direct ${formProcedureType}`, amount: baseFee },
-        { description: `Sedation & Anesthesia Care (${formSedationType})`, amount: sedationFee },
-        { description: `Disposable Biopsy Kit & HP Pack`, amount: kitFee }
+        { description: `Sedation & Anesthesia Care (${formSedationType})`, amount: numSedation },
+        { description: `Disposable Biopsy Kit & HP Pack`, amount: numKit }
       ],
-      subtotal: baseFee + sedationFee + kitFee,
-      discount: discountAmount,
+      subtotal: baseFee + numSedation + numKit,
+      discount: numDiscount,
       total: netTotalAmount,
       paidAmount: netTotalAmount,
       paymentMethod: paymentMode,
@@ -444,6 +448,9 @@ export function EndoscopyProcedureModule() {
     }
 
     setIsRegisterModalOpen(false);
+    setSedationFee(0);
+    setKitFee(0);
+    setDiscountAmount(0);
     toast.success(`Direct Procedure & Payment collected successfully! Invoice #${invoiceId}`);
   };
 
@@ -1202,7 +1209,12 @@ export function EndoscopyProcedureModule() {
             </Button>
             <Button 
               size="sm" 
-              onClick={() => setIsRegisterModalOpen(true)}
+              onClick={() => {
+                setSedationFee(0);
+                setKitFee(0);
+                setDiscountAmount(0);
+                setIsRegisterModalOpen(true);
+              }}
               className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-xs gap-2 rounded-xl shadow-sm h-10"
             >
               <Plus className="w-4 h-4" /> Direct Registration & Billing
@@ -1518,7 +1530,12 @@ export function EndoscopyProcedureModule() {
                 <CardContent className="p-4 pt-2">
                   <Button 
                     className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-9 gap-2 rounded-xl"
-                    onClick={() => setIsRegisterModalOpen(true)}
+                    onClick={() => {
+                      setSedationFee(0);
+                      setKitFee(0);
+                      setDiscountAmount(0);
+                      setIsRegisterModalOpen(true);
+                    }}
                   >
                     <Receipt className="w-4 h-4" />
                     Open Direct Invoice & Billing
@@ -2259,7 +2276,17 @@ export function EndoscopyProcedureModule() {
       </Tabs>
 
       {/* MODAL 1: Direct Procedure Registration & Instant Billing */}
-      <Dialog open={isRegisterModalOpen} onOpenChange={setIsRegisterModalOpen}>
+      <Dialog 
+        open={isRegisterModalOpen} 
+        onOpenChange={(open) => {
+          if (open) {
+            setSedationFee(0);
+            setKitFee(0);
+            setDiscountAmount(0);
+          }
+          setIsRegisterModalOpen(open);
+        }}
+      >
         <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto rounded-2xl">
           <DialogHeader>
             <DialogTitle className="text-lg font-black text-slate-900 flex items-center gap-2">
@@ -2406,7 +2433,7 @@ export function EndoscopyProcedureModule() {
                     <SelectContent>
                       {Object.keys(rateCard).map((pName) => (
                         <SelectItem key={pName} value={pName} className="text-xs">
-                          {pName} — Total Package: ₹{((rateCard[pName]?.baseFee || 0) + (rateCard[pName]?.sedationFee || 0) + (rateCard[pName]?.kitFee || 0)).toLocaleString('en-IN')}
+                          {pName} — Base Rate: ₹{(rateCard[pName]?.baseFee || 0).toLocaleString('en-IN')}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -2465,24 +2492,44 @@ export function EndoscopyProcedureModule() {
                 </div>
 
                 <div>
-                  <Label className="text-[9px] font-bold text-slate-600">Sedation Fee</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-[9px] font-bold text-slate-600">Sedation Fee</Label>
+                    <span className="text-[8px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-100">Editable (₹)</span>
+                  </div>
                   <Input 
                     type="number" 
                     placeholder="0"
                     value={sedationFee} 
-                    readOnly
-                    className="h-8 text-xs bg-slate-50 text-slate-500 cursor-not-allowed font-bold" 
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSedationFee(val === '' ? '' : Math.max(0, parseFloat(val) || 0));
+                    }}
+                    onBlur={() => {
+                      if (sedationFee === '' || isNaN(Number(sedationFee))) setSedationFee(0);
+                    }}
+                    onFocus={(e) => e.target.select()}
+                    className="h-8 text-xs bg-white text-slate-900 font-bold border-slate-300 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 shadow-2xs" 
                   />
                 </div>
 
                 <div>
-                  <Label className="text-[9px] font-bold text-slate-600">Biopsy Pack Fee</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-[9px] font-bold text-slate-600">Biopsy Pack Fee</Label>
+                    <span className="text-[8px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-100">Editable (₹)</span>
+                  </div>
                   <Input 
                     type="number" 
                     placeholder="0"
                     value={kitFee} 
-                    readOnly
-                    className="h-8 text-xs bg-slate-50 text-slate-500 cursor-not-allowed font-bold" 
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setKitFee(val === '' ? '' : Math.max(0, parseFloat(val) || 0));
+                    }}
+                    onBlur={() => {
+                      if (kitFee === '' || isNaN(Number(kitFee))) setKitFee(0);
+                    }}
+                    onFocus={(e) => e.target.select()}
+                    className="h-8 text-xs bg-white text-slate-900 font-bold border-slate-300 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 shadow-2xs" 
                   />
                 </div>
 
