@@ -28,7 +28,8 @@ import {
   RefreshCw,
   Settings2,
   UserPlus,
-  Microscope
+  Microscope,
+  Calendar
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1299,6 +1300,26 @@ export default function Billing() {
   const [isGeneratingBill, setIsGeneratingBill] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingBill, setEditingBill] = useState<any>(null);
+
+  // States for Daily Sheet Print Modal
+  const [isDailySheetModalOpen, setIsDailySheetModalOpen] = useState(false);
+  const [dailySheetDate, setDailySheetDate] = useState(() => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  });
+  const [dailySheetDept, setDailySheetDept] = useState('all');
+  const [dailySheetPaymentMode, setDailySheetPaymentMode] = useState('all');
+
+  const getTodayDateString = () => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  };
+
+  const getYesterdayDateString = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
 
   // Quick Add Patient state
   const [isQuickAddPatientOpen, setIsQuickAddPatientOpen] = useState(false);
@@ -2982,6 +3003,601 @@ export default function Billing() {
     printWindow.document.close();
   };
 
+  const dailySheetPreviewData = useMemo(() => {
+    const targetDate = dailySheetDate || getTodayDateString();
+
+    const dayBills = bills.filter((b: any) => {
+      let bDateStr = '';
+      const rawDate = b.date || b.created_at || b.created_date || b.invoice_date;
+      if (rawDate) {
+        if (typeof rawDate === 'string') {
+          const m = rawDate.match(/^\d{4}-\d{2}-\d{2}/);
+          if (m) bDateStr = m[0];
+        }
+        if (!bDateStr) {
+          try {
+            const d = new Date(rawDate);
+            if (!isNaN(d.getTime())) {
+              bDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            }
+          } catch {}
+        }
+      }
+      if (!bDateStr) bDateStr = getTodayDateString();
+      if (bDateStr !== targetDate) return false;
+
+      const deptInfo = getBillDepartmentAndType(b);
+      const bDept = (deptInfo.departmentName || b.department || b.category || b.type || 'General').toLowerCase();
+      if (dailySheetDept !== 'all' && !bDept.includes(dailySheetDept.toLowerCase())) return false;
+
+      const pMode = String(b.payment_method || b.paymentMethod || 'Cash').toLowerCase();
+      if (dailySheetPaymentMode !== 'all' && !pMode.includes(dailySheetPaymentMode.toLowerCase())) return false;
+
+      return true;
+    });
+
+    let gross = 0;
+    let discount = 0;
+    let paid = 0;
+    let due = 0;
+    let cash = 0;
+    let upi = 0;
+    let card = 0;
+    let bank = 0;
+
+    dayBills.forEach((b: any) => {
+      const g = Number(b.total_amount ?? b.totalAmount ?? b.total ?? 0);
+      const d = Number(b.discount ?? b.discount_amount ?? 0);
+      const payable = Number(b.payable_amount ?? b.payableAmount ?? Math.max(0, g - d));
+      const p = Number(b.paid_amount ?? b.paidAmount ?? (b.status === 'Paid' ? payable : 0));
+      const du = Number(b.due ?? b.due_amount ?? Math.max(0, payable - p));
+
+      gross += g;
+      discount += d;
+      paid += p;
+      due += du;
+
+      const m = String(b.payment_method || b.paymentMethod || 'Cash').toLowerCase();
+      if (m.includes('cash')) cash += p;
+      else if (m.includes('upi') || m.includes('qr')) upi += p;
+      else if (m.includes('card') || m.includes('pos')) card += p;
+      else if (m.includes('bank') || m.includes('neft') || m.includes('rtgs')) bank += p;
+    });
+
+    return {
+      count: dayBills.length,
+      gross,
+      discount,
+      paid,
+      due,
+      cash,
+      upi,
+      card,
+      bank,
+      dayBills
+    };
+  }, [bills, dailySheetDate, dailySheetDept, dailySheetPaymentMode]);
+
+  const printBillingDailySheet = (targetDate?: string, deptFilter: string = 'all', modeFilter: string = 'all') => {
+    const dateToPrint = targetDate || dailySheetDate || getTodayDateString();
+
+    const printWindow = window.open('', '_blank', 'width=1100,height=850');
+    if (!printWindow) {
+      toast.error('Please allow popups in your browser to print the Daily Sheet');
+      return;
+    }
+
+    // Filter matching bills
+    const dayBills = bills.filter((b: any) => {
+      let bDateStr = '';
+      const rawDate = b.date || b.created_at || b.created_date || b.invoice_date;
+      if (rawDate) {
+        if (typeof rawDate === 'string') {
+          const m = rawDate.match(/^\d{4}-\d{2}-\d{2}/);
+          if (m) bDateStr = m[0];
+        }
+        if (!bDateStr) {
+          try {
+            const d = new Date(rawDate);
+            if (!isNaN(d.getTime())) {
+              bDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            }
+          } catch {}
+        }
+      }
+      if (!bDateStr) {
+        bDateStr = getTodayDateString();
+      }
+
+      if (bDateStr !== dateToPrint) return false;
+
+      const deptInfo = getBillDepartmentAndType(b);
+      const bDept = (deptInfo.departmentName || b.department || b.category || b.type || 'General').toLowerCase();
+      if (deptFilter && deptFilter !== 'all') {
+        if (!bDept.includes(deptFilter.toLowerCase())) return false;
+      }
+
+      const pMode = String(b.payment_method || b.paymentMethod || 'Cash').toLowerCase();
+      if (modeFilter && modeFilter !== 'all') {
+        if (!pMode.includes(modeFilter.toLowerCase())) return false;
+      }
+
+      return true;
+    }).sort((a: any, b: any) => {
+      const timeA = new Date(a.created_at || a.date || 0).getTime();
+      const timeB = new Date(b.created_at || b.date || 0).getTime();
+      return timeA - timeB;
+    });
+
+    let totalGross = 0;
+    let totalDiscount = 0;
+    let totalPaid = 0;
+    let totalDue = 0;
+
+    let cashTotal = 0;
+    let upiTotal = 0;
+    let cardTotal = 0;
+    let bankTotal = 0;
+    let otherModeTotal = 0;
+
+    const deptBreakdown: Record<string, { count: number; gross: number; paid: number }> = {};
+
+    dayBills.forEach((b: any) => {
+      const gross = Number(b.total_amount ?? b.totalAmount ?? b.total ?? 0);
+      const disc = Number(b.discount ?? b.discount_amount ?? 0);
+      const payable = Number(b.payable_amount ?? b.payableAmount ?? Math.max(0, gross - disc));
+      const paid = Number(b.paid_amount ?? b.paidAmount ?? (b.status === 'Paid' ? payable : 0));
+      const due = Number(b.due ?? b.due_amount ?? Math.max(0, payable - paid));
+
+      totalGross += gross;
+      totalDiscount += disc;
+      totalPaid += paid;
+      totalDue += due;
+
+      const pMethod = String(b.payment_method || b.paymentMethod || 'Cash').toLowerCase();
+      if (pMethod.includes('cash')) cashTotal += paid;
+      else if (pMethod.includes('upi') || pMethod.includes('qr')) upiTotal += paid;
+      else if (pMethod.includes('card') || pMethod.includes('pos')) cardTotal += paid;
+      else if (pMethod.includes('bank') || pMethod.includes('neft') || pMethod.includes('rtgs')) bankTotal += paid;
+      else otherModeTotal += paid;
+
+      const deptInfo = getBillDepartmentAndType(b);
+      const dName = (deptInfo.departmentName || b.department || b.category || b.type || 'General').toUpperCase();
+      if (!deptBreakdown[dName]) {
+        deptBreakdown[dName] = { count: 0, gross: 0, paid: 0 };
+      }
+      deptBreakdown[dName].count += 1;
+      deptBreakdown[dName].gross += gross;
+      deptBreakdown[dName].paid += paid;
+    });
+
+    // Expenses for same date
+    const dateExpenses = expenses.filter((e: any) => {
+      const eDate = getCleanDateString(e.expense_date || e.created_at || '') || (e.date ? String(e.date).split('T')[0] : '');
+      return eDate === dateToPrint;
+    });
+    const totalExpenses = dateExpenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0);
+
+    const parsedDate = new Date(dateToPrint + 'T12:00:00');
+    const formattedDateHeader = isNaN(parsedDate.getTime()) 
+      ? dateToPrint 
+      : parsedDate.toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+
+    const printTimeStr = new Date().toLocaleString('en-IN', { 
+      day: '2-digit', 
+      month: 'short', 
+      year: 'numeric', 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      hour12: true 
+    });
+
+    const rowsHtml = dayBills.length === 0 ? `
+      <tr>
+        <td colspan="11" style="text-align: center; padding: 25px; color: #64748b; font-style: italic;">
+          No billing transactions recorded on ${formattedDateHeader}${deptFilter !== 'all' ? ` for department "${deptFilter}"` : ''}${modeFilter !== 'all' ? ` for payment mode "${modeFilter}"` : ''}.
+        </td>
+      </tr>
+    ` : dayBills.map((b: any, idx: number) => {
+      const pat = getBillPatientInfo(b);
+      const gross = Number(b.total_amount ?? b.totalAmount ?? b.total ?? 0);
+      const disc = Number(b.discount ?? b.discount_amount ?? 0);
+      const payable = Number(b.payable_amount ?? b.payableAmount ?? Math.max(0, gross - disc));
+      const paid = Number(b.paid_amount ?? b.paidAmount ?? (b.status === 'Paid' ? payable : 0));
+      const due = Number(b.due ?? b.due_amount ?? Math.max(0, payable - paid));
+      const status = b.status || (paid >= payable && payable > 0 ? 'Paid' : paid > 0 ? 'Partial' : 'Pending');
+      const mode = b.payment_method || b.paymentMethod || 'Cash';
+      const invId = activeInvoiceMap[b.id] || sequentialIdMap[b.id] || (b.id.length > 8 ? b.id.substring(0, 8) : b.id);
+      
+      const deptInfo = getBillDepartmentAndType(b);
+      const dept = deptInfo.departmentName || b.department || b.category || b.type || 'General';
+
+      let timeStr = '--:--';
+      const rawDate = b.created_at || b.date || b.invoice_date;
+      if (rawDate) {
+        try {
+          const d = new Date(rawDate);
+          if (!isNaN(d.getTime())) {
+            timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+          }
+        } catch {}
+      }
+
+      const statusClass = status.toLowerCase().includes('paid') ? 'status-paid' : status.toLowerCase().includes('partial') ? 'status-partial' : 'status-pending';
+
+      return `
+        <tr>
+          <td style="text-align: center; font-weight: bold;">${idx + 1}</td>
+          <td style="font-weight: 800; font-family: monospace; color: #0369a1;">#${invId}</td>
+          <td style="white-space: nowrap; font-size: 9.5px; color: #475569;">${timeStr}</td>
+          <td>
+            <div style="font-weight: 800; color: #0f172a;">${pat.name || 'Walk-in Patient'}</div>
+            <div style="font-size: 9px; color: #64748b;">
+              ${pat.mrn && pat.mrn !== 'N/A' ? `MRN: <b>${pat.mrn}</b> | ` : ''}
+              ${pat.gender || 'M'}/${pat.age || '--'}
+              ${pat.phone && pat.phone !== 'N/A' ? ` | Ph: ${pat.phone}` : ''}
+            </div>
+          </td>
+          <td style="font-size: 9.5px; font-weight: 600; color: #334155;">${dept}</td>
+          <td style="font-size: 9.5px; font-weight: 700;">${mode}</td>
+          <td style="text-align: right; font-weight: 600;">₹${gross.toLocaleString('en-IN')}</td>
+          <td style="text-align: right; color: #b45309;">${disc > 0 ? `₹${disc.toLocaleString('en-IN')}` : '-'}</td>
+          <td style="text-align: right; font-weight: 800; color: #047857;">₹${paid.toLocaleString('en-IN')}</td>
+          <td style="text-align: right; font-weight: 700; color: ${due > 0 ? '#b91c1c' : '#64748b'};">${due > 0 ? `₹${due.toLocaleString('en-IN')}` : '-'}</td>
+          <td style="text-align: center;">
+            <span class="status-badge ${statusClass}">${status}</span>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    const deptRowsHtml = Object.entries(deptBreakdown).map(([dName, dStats]) => `
+      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 4px 8px; font-size: 9.5px; display: inline-flex; align-items: center; gap: 6px;">
+        <span style="font-weight: 800; color: #1e293b;">${dName}:</span>
+        <span style="color: #64748b;">${dStats.count} bill${dStats.count === 1 ? '' : 's'}</span>
+        <span style="font-weight: 800; color: #047857;">₹${dStats.paid.toLocaleString('en-IN')}</span>
+      </div>
+    `).join('');
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Daily Billing & Collection Sheet - ${dateToPrint}</title>
+          <meta charset="utf-8" />
+          <style>
+            @page {
+              size: A4 landscape;
+              margin: 8mm 10mm 8mm 10mm;
+            }
+            * {
+              box-sizing: border-box;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+              margin: 0;
+              padding: 0;
+              color: #0f172a;
+              background: #ffffff;
+              font-size: 10.5px;
+              line-height: 1.35;
+            }
+            .header-table {
+              width: 100%;
+              border-bottom: 2.5px solid #047857;
+              padding-bottom: 8px;
+              margin-bottom: 10px;
+            }
+            .hosp-title {
+              font-size: 19px;
+              font-weight: 900;
+              color: #065f46;
+              text-transform: uppercase;
+              margin: 0;
+              letter-spacing: 0.5px;
+            }
+            .hosp-sub {
+              font-size: 10px;
+              color: #475569;
+              margin-top: 2px;
+            }
+            .sheet-title {
+              font-size: 13px;
+              font-weight: 900;
+              color: #065f46;
+              text-transform: uppercase;
+              background: #ecfdf5;
+              padding: 4px 10px;
+              border: 1.5px solid #a7f3d0;
+              border-radius: 6px;
+              display: inline-block;
+              letter-spacing: 0.5px;
+            }
+            .meta-text {
+              font-size: 9.5px;
+              color: #64748b;
+              margin-top: 3px;
+            }
+
+            /* Metrics Cards */
+            .metrics-grid {
+              display: grid;
+              grid-template-columns: repeat(6, 1fr);
+              gap: 8px;
+              margin-bottom: 10px;
+            }
+            .metric-card {
+              background: #f8fafc;
+              border: 1px solid #cbd5e1;
+              border-radius: 6px;
+              padding: 6px 8px;
+            }
+            .metric-card.success {
+              background: #ecfdf5;
+              border-color: #6ee7b7;
+            }
+            .metric-card.primary {
+              background: #eff6ff;
+              border-color: #93c5fd;
+            }
+            .metric-card.warning {
+              background: #fffbeb;
+              border-color: #fde68a;
+            }
+            .metric-label {
+              font-size: 8.5px;
+              font-weight: 800;
+              text-transform: uppercase;
+              color: #64748b;
+              margin-bottom: 2px;
+            }
+            .metric-val {
+              font-size: 13px;
+              font-weight: 900;
+              color: #0f172a;
+            }
+            .metric-sub {
+              font-size: 8px;
+              color: #94a3b8;
+              margin-top: 1px;
+            }
+
+            /* Mode Summary Bar */
+            .mode-bar {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              background: #f1f5f9;
+              border: 1px solid #e2e8f0;
+              border-radius: 6px;
+              padding: 6px 10px;
+              margin-bottom: 10px;
+              font-size: 9.5px;
+            }
+            .mode-item {
+              display: flex;
+              align-items: center;
+              gap: 4px;
+              font-weight: 700;
+              color: #334155;
+            }
+
+            /* Data Table */
+            table.data-table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 9.5px;
+              margin-bottom: 12px;
+            }
+            table.data-table th, table.data-table td {
+              border: 1px solid #cbd5e1;
+              padding: 4.5px 6px;
+              text-align: left;
+            }
+            table.data-table th {
+              background-color: #f1f5f9;
+              color: #1e293b;
+              font-weight: 800;
+              text-transform: uppercase;
+              font-size: 8.5px;
+            }
+            table.data-table tr:nth-child(even) {
+              background-color: #f8fafc;
+            }
+            .status-badge {
+              display: inline-block;
+              padding: 1px 5px;
+              border-radius: 3px;
+              font-size: 8px;
+              font-weight: 800;
+              text-transform: uppercase;
+            }
+            .status-paid { background: #dcfce7; color: #166534; }
+            .status-partial { background: #fef3c7; color: #92400e; }
+            .status-pending { background: #fee2e2; color: #991b1b; }
+
+            /* Signatures */
+            .sign-section {
+              display: flex;
+              justify-content: space-between;
+              margin-top: 20px;
+              page-break-inside: avoid;
+            }
+            .sign-box {
+              width: 220px;
+              text-align: center;
+            }
+            .sign-line {
+              border-top: 1.5px solid #0f172a;
+              margin-bottom: 4px;
+            }
+            .sign-title {
+              font-size: 9.5px;
+              font-weight: 800;
+              color: #334155;
+              text-transform: uppercase;
+            }
+            .sign-sub {
+              font-size: 8px;
+              color: #64748b;
+            }
+
+            @media print {
+              body { padding: 0; }
+              @page { size: A4 landscape; margin: 8mm 10mm 8mm 10mm; }
+            }
+          </style>
+        </head>
+        <body>
+          <table class="header-table">
+            <tr>
+              <td style="vertical-align: middle; width: 65%;">
+                <div class="hosp-title">${hospitalInfo.name}</div>
+                <div class="hosp-sub">${hospitalInfo.address}</div>
+                <div class="hosp-sub">Tel: <b>${hospitalInfo.phone}</b> | Email: ${hospitalInfo.email || 'gatroplusbhopal@gmail.com'}</div>
+              </td>
+              <td style="vertical-align: middle; text-align: right; width: 35%;">
+                <div class="sheet-title">Daily Billing & Collection Sheet</div>
+                <div class="meta-text"><b>Date:</b> ${formattedDateHeader}</div>
+                <div class="meta-text">Generated: ${printTimeStr} | By: ${currentUser?.name || 'Accounts Staff'}</div>
+              </td>
+            </tr>
+          </table>
+
+          <!-- Executive Financial Metrics -->
+          <div class="metrics-grid">
+            <div class="metric-card primary">
+              <div class="metric-label">Total Invoices</div>
+              <div class="metric-val" style="color: #0369a1;">${dayBills.length}</div>
+              <div class="metric-sub">Bills processed today</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Gross Billed</div>
+              <div class="metric-val">₹${totalGross.toLocaleString('en-IN')}</div>
+              <div class="metric-sub">Total catalog value</div>
+            </div>
+            <div class="metric-card warning">
+              <div class="metric-label">Total Discounts</div>
+              <div class="metric-val" style="color: #b45309;">₹${totalDiscount.toLocaleString('en-IN')}</div>
+              <div class="metric-sub">Waivers / concessions</div>
+            </div>
+            <div class="metric-card success">
+              <div class="metric-label">Net Collection</div>
+              <div class="metric-val" style="color: #047857;">₹${totalPaid.toLocaleString('en-IN')}</div>
+              <div class="metric-sub">Actual payments received</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Outstanding / Dues</div>
+              <div class="metric-val" style="color: ${totalDue > 0 ? '#dc2626' : '#64748b'};">₹${totalDue.toLocaleString('en-IN')}</div>
+              <div class="metric-sub">Pending receivables</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Cash In Counter</div>
+              <div class="metric-val" style="color: #065f46;">₹${cashTotal.toLocaleString('en-IN')}</div>
+              <div class="metric-sub">${totalExpenses > 0 ? `Expenses: ₹${totalExpenses.toLocaleString('en-IN')}` : 'Physical currency'}</div>
+            </div>
+          </div>
+
+          <!-- Mode Breakdown Strip -->
+          <div class="mode-bar">
+            <div class="mode-item">
+              <span>💵 Cash:</span> <span style="color: #065f46;">₹${cashTotal.toLocaleString('en-IN')}</span>
+            </div>
+            <div class="mode-item">
+              <span>📱 UPI / QR:</span> <span style="color: #0284c7;">₹${upiTotal.toLocaleString('en-IN')}</span>
+            </div>
+            <div class="mode-item">
+              <span>💳 Card (POS):</span> <span style="color: #7c3aed;">₹${cardTotal.toLocaleString('en-IN')}</span>
+            </div>
+            <div class="mode-item">
+              <span>🏦 Bank / NEFT:</span> <span style="color: #475569;">₹${bankTotal.toLocaleString('en-IN')}</span>
+            </div>
+            ${otherModeTotal > 0 ? `
+              <div class="mode-item">
+                <span>📄 Other:</span> <span>₹${otherModeTotal.toLocaleString('en-IN')}</span>
+              </div>
+            ` : ''}
+            <div class="mode-item" style="border-left: 1.5px solid #cbd5e1; padding-left: 8px;">
+              <span>TOTAL COLLECTED:</span> <span style="color: #047857; font-size: 11px;">₹${totalPaid.toLocaleString('en-IN')}</span>
+            </div>
+          </div>
+
+          ${Object.keys(deptBreakdown).length > 0 ? `
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; align-items: center;">
+              <span style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #64748b;">Department Breakdown:</span>
+              ${deptRowsHtml}
+            </div>
+          ` : ''}
+
+          <!-- Detailed Itemized Ledger -->
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width: 30px; text-align: center;">#</th>
+                <th style="width: 75px;">Invoice ID</th>
+                <th style="width: 60px;">Time</th>
+                <th>Patient Details</th>
+                <th style="width: 110px;">Department</th>
+                <th style="width: 80px;">Payment Mode</th>
+                <th style="width: 75px; text-align: right;">Gross (₹)</th>
+                <th style="width: 65px; text-align: right;">Discount</th>
+                <th style="width: 75px; text-align: right;">Paid (₹)</th>
+                <th style="width: 65px; text-align: right;">Due (₹)</th>
+                <th style="width: 65px; text-align: center;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+            <tfoot>
+              <tr style="background-color: #f1f5f9; font-weight: 800; font-size: 9.5px;">
+                <td colspan="6" style="text-align: right; text-transform: uppercase;">
+                  TOTAL FOR THE DAY (${dayBills.length} Invoices):
+                </td>
+                <td style="text-align: right;">₹${totalGross.toLocaleString('en-IN')}</td>
+                <td style="text-align: right; color: #b45309;">₹${totalDiscount.toLocaleString('en-IN')}</td>
+                <td style="text-align: right; color: #047857;">₹${totalPaid.toLocaleString('en-IN')}</td>
+                <td style="text-align: right; color: ${totalDue > 0 ? '#b91c1c' : '#64748b'};">₹${totalDue.toLocaleString('en-IN')}</td>
+                <td style="text-align: center; color: #047857;">VERIFIED</td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <!-- Sign-Off Section -->
+          <div class="sign-section">
+            <div class="sign-box">
+              <div class="sign-line"></div>
+              <div class="sign-title">Cashier / Billing Clerk</div>
+              <div class="sign-sub">Prepared by: ${currentUser?.name || 'Billing Desk'}</div>
+            </div>
+            <div class="sign-box">
+              <div class="sign-line"></div>
+              <div class="sign-title">Hospital Accountant</div>
+              <div class="sign-sub">Audited & Reconciled with Cash/Bank</div>
+            </div>
+            <div class="sign-box">
+              <div class="sign-line"></div>
+              <div class="sign-title">Medical Superintendent</div>
+              <div class="sign-sub">Authorized Signatory & Hospital Seal</div>
+            </div>
+          </div>
+
+          <script>
+            window.onload = function() {
+              window.focus();
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -3099,6 +3715,17 @@ export default function Billing() {
               Export
             </Button>
             <Button 
+              className="bg-white text-emerald-950 hover:bg-emerald-50 gap-2 rounded-xl font-black h-10 shadow-md cursor-pointer border border-emerald-100"
+              onClick={() => {
+                setDailySheetDate(getTodayDateString());
+                setIsDailySheetModalOpen(true);
+              }}
+              title="Print Daily Billing & Collection Register (A4 Landscape)"
+            >
+              <Printer className="w-4 h-4 text-emerald-700" />
+              Print Daily Sheet
+            </Button>
+            <Button 
               className="bg-white text-emerald-900 hover:bg-emerald-50 gap-2 rounded-xl font-black h-10 shadow-md"
               onClick={() => setIsHistoryOpen(true)}
             >
@@ -3129,9 +3756,23 @@ export default function Billing() {
                   Complete audit log of all hospital billing transactions grouped by date.
                 </DialogDescription>
               </div>
-              <Badge className="bg-blue-100 text-blue-900 font-extrabold text-xs">
-                {bills.length} Total Invoice{bills.length === 1 ? '' : 's'}
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100 text-xs font-bold shadow-xs cursor-pointer"
+                  onClick={() => {
+                    printBillingDailySheet(getTodayDateString());
+                  }}
+                  title="Print Today's Daily Sheet"
+                >
+                  <Printer className="w-3.5 h-3.5 text-emerald-700" />
+                  Print Today's Sheet
+                </Button>
+                <Badge className="bg-blue-100 text-blue-900 font-extrabold text-xs">
+                  {bills.length} Total Invoice{bills.length === 1 ? '' : 's'}
+                </Badge>
+              </div>
             </div>
           </DialogHeader>
 
@@ -3172,6 +3813,16 @@ export default function Billing() {
                           </span>
                         </div>
                         <div className="text-right flex items-center gap-3">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-[11px] font-bold gap-1 text-emerald-800 border-emerald-300 bg-emerald-50/60 hover:bg-emerald-100 cursor-pointer shadow-2xs"
+                            onClick={() => printBillingDailySheet(dateKey)}
+                            title={`Print Daily Sheet for ${dateKey}`}
+                          >
+                            <Printer className="w-3 h-3 text-emerald-700" />
+                            Print Day Sheet
+                          </Button>
                           <div className="text-xs text-slate-500">
                             Collected: <span className="font-bold text-emerald-700">{formatCurrency(dayPaid)}</span>
                           </div>
@@ -3243,6 +3894,159 @@ export default function Billing() {
             <DialogTrigger asChild>
               <Button variant="outline" className="h-8 text-xs font-bold">Close</Button>
             </DialogTrigger>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL: Print Daily Sheet Configuration & Instant Export */}
+      <Dialog open={isDailySheetModalOpen} onOpenChange={setIsDailySheetModalOpen}>
+        <DialogContent className="sm:max-w-[620px] rounded-2xl p-0 overflow-hidden shadow-2xl border border-slate-200">
+          <DialogHeader className="p-5 border-b bg-emerald-50/70">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-emerald-100 text-emerald-800 rounded-xl border border-emerald-200">
+                <Printer className="w-5 h-5" />
+              </div>
+              <div>
+                <DialogTitle className="text-base font-bold text-slate-900">
+                  Print Daily Billing & Collection Sheet
+                </DialogTitle>
+                <DialogDescription className="text-xs text-slate-600 mt-0.5">
+                  Generate official hospital daily cash and billing register (A4 landscape format).
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="p-5 space-y-4">
+            {/* Date Selection and Quick Presets */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">Target Date</label>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setDailySheetDate(getTodayDateString())}
+                    className={`text-[10px] font-extrabold px-2.5 py-1 rounded-md border transition-all cursor-pointer ${
+                      dailySheetDate === getTodayDateString() 
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs' 
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDailySheetDate(getYesterdayDateString())}
+                    className={`text-[10px] font-extrabold px-2.5 py-1 rounded-md border transition-all cursor-pointer ${
+                      dailySheetDate === getYesterdayDateString() 
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs' 
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    Yesterday
+                  </button>
+                </div>
+              </div>
+              <div className="relative">
+                <Input
+                  type="date"
+                  value={dailySheetDate}
+                  onChange={(e) => setDailySheetDate(e.target.value)}
+                  className="h-10 text-xs font-bold bg-slate-50 border-slate-200 focus:bg-white"
+                />
+              </div>
+            </div>
+
+            {/* Optional Department & Payment Mode Filters */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">Department Scope</label>
+                <Select value={dailySheetDept} onValueChange={setDailySheetDept}>
+                  <SelectTrigger className="h-9 text-xs bg-white border-slate-200 font-semibold">
+                    <SelectValue placeholder="All Departments" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Hospital Departments</SelectItem>
+                    <SelectItem value="opd">OPD Consultations</SelectItem>
+                    <SelectItem value="ipd">IPD / Inpatient Ward</SelectItem>
+                    <SelectItem value="pharmacy">Pharmacy</SelectItem>
+                    <SelectItem value="lab">Laboratory & Diagnostics</SelectItem>
+                    <SelectItem value="radiology">Radiology</SelectItem>
+                    <SelectItem value="endoscopy">Endoscopy & Procedures</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">Payment Mode</label>
+                <Select value={dailySheetPaymentMode} onValueChange={setDailySheetPaymentMode}>
+                  <SelectTrigger className="h-9 text-xs bg-white border-slate-200 font-semibold">
+                    <SelectValue placeholder="All Payment Modes" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Payment Modes</SelectItem>
+                    <SelectItem value="cash">Cash Only</SelectItem>
+                    <SelectItem value="upi">UPI / QR Scan</SelectItem>
+                    <SelectItem value="card">Card (POS)</SelectItem>
+                    <SelectItem value="bank">Bank Transfer / NEFT</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Live Day Preview Card */}
+            <div className="bg-slate-900 text-white rounded-xl p-4 space-y-3 border border-slate-800 shadow-inner">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                  Summary for {dailySheetDate}
+                </span>
+                <Badge className="bg-emerald-500/20 text-emerald-300 font-mono text-xs border-emerald-500/30">
+                  {dailySheetPreviewData.count} Invoices Found
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700/60">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Gross Billed</div>
+                  <div className="text-sm font-black text-white">{formatCurrency(dailySheetPreviewData.gross)}</div>
+                </div>
+                <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700/60">
+                  <div className="text-[10px] text-emerald-400 font-bold uppercase">Collected / Paid</div>
+                  <div className="text-sm font-black text-emerald-400">{formatCurrency(dailySheetPreviewData.paid)}</div>
+                </div>
+                <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700/60">
+                  <div className="text-[10px] text-amber-400 font-bold uppercase">Pending Dues</div>
+                  <div className="text-sm font-black text-amber-300">{formatCurrency(dailySheetPreviewData.due)}</div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-slate-300 bg-slate-800/40 p-2 rounded-lg border border-slate-700/40">
+                <span>💵 Cash: <b className="text-white">{formatCurrency(dailySheetPreviewData.cash)}</b></span>
+                <span>📱 UPI: <b className="text-white">{formatCurrency(dailySheetPreviewData.upi)}</b></span>
+                <span>💳 Card: <b className="text-white">{formatCurrency(dailySheetPreviewData.card)}</b></span>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="p-4 border-t bg-slate-50/90 flex items-center justify-between gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 text-xs font-bold"
+              onClick={() => setIsDailySheetModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="h-9 gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer"
+              onClick={() => {
+                printBillingDailySheet(dailySheetDate, dailySheetDept, dailySheetPaymentMode);
+                setIsDailySheetModalOpen(false);
+              }}
+            >
+              <Printer className="w-4 h-4" />
+              Print Daily Sheet (A4 Landscape)
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -5194,6 +5998,20 @@ export default function Billing() {
                   </Button>
                 )}
               </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5 bg-emerald-50 border-emerald-300 hover:bg-emerald-100 text-emerald-950 font-bold text-xs shrink-0 cursor-pointer shadow-xs"
+                onClick={() => {
+                  setDailySheetDate(recentInvoicesStartDate || getTodayDateString());
+                  setIsDailySheetModalOpen(true);
+                }}
+                title="Print Daily Billing & Collection Sheet (A4 Landscape)"
+              >
+                <Printer className="w-3.5 h-3.5 text-emerald-700" />
+                Print Daily Sheet
+              </Button>
             </div>
           </CardHeader>
           <CardContent className="p-0">
@@ -5981,6 +6799,10 @@ export default function Billing() {
           setOpdEndDate={setOpdEndDate}
           opdDoctorFilter={opdDoctorFilter}
           setOpdDoctorFilter={setOpdDoctorFilter}
+          onPrintDailySheet={() => {
+            setDailySheetDate(opdStartDate || getTodayDateString());
+            setIsDailySheetModalOpen(true);
+          }}
         />
       )}
 

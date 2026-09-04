@@ -20,6 +20,7 @@ interface OPDCollectionTabProps {
   setOpdEndDate: (val: string) => void;
   opdDoctorFilter: string;
   setOpdDoctorFilter: (val: string) => void;
+  onPrintDailySheet?: () => void;
 }
 
 export function OPDCollectionTab({
@@ -33,6 +34,7 @@ export function OPDCollectionTab({
   setOpdEndDate,
   opdDoctorFilter,
   setOpdDoctorFilter,
+  onPrintDailySheet,
 }: OPDCollectionTabProps) {
 
   // Map raw appointments to include patient and doctor details
@@ -220,11 +222,21 @@ export function OPDCollectionTab({
                 </Select>
               </div>
 
-              <div className="pt-5">
+              <div className="pt-5 flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={handlePrint} className="h-9 border-slate-200">
                   <Printer className="w-4 h-4 mr-1.5" />
                   Print Statement
                 </Button>
+                {onPrintDailySheet && (
+                  <Button 
+                    size="sm" 
+                    onClick={onPrintDailySheet} 
+                    className="h-9 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs gap-1.5 shadow-xs cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4" />
+                    Print Daily Sheet
+                  </Button>
+                )}
               </div>
             </div>
           </div>
