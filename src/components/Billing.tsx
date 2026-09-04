@@ -29,7 +29,13 @@ import {
   Settings2,
   UserPlus,
   Microscope,
-  Calendar
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  FileSpreadsheet,
+  FileText,
+  LayoutList
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1309,6 +1315,8 @@ export default function Billing() {
   });
   const [dailySheetDept, setDailySheetDept] = useState('all');
   const [dailySheetPaymentMode, setDailySheetPaymentMode] = useState('all');
+  const [dailySheetSearch, setDailySheetSearch] = useState('');
+  const [dailySheetViewMode, setDailySheetViewMode] = useState<'register' | 'paper'>('register');
 
   const getTodayDateString = () => {
     const today = new Date();
@@ -1319,6 +1327,22 @@ export default function Billing() {
     const d = new Date();
     d.setDate(d.getDate() - 1);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  const changeDailySheetDate = (deltaDays: number) => {
+    try {
+      const parts = (dailySheetDate || getTodayDateString()).split('-');
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const d = parseInt(parts[2], 10);
+      const dt = new Date(y, m, d + deltaDays);
+      if (!isNaN(dt.getTime())) {
+        const ny = dt.getFullYear();
+        const nm = String(dt.getMonth() + 1).padStart(2, '0');
+        const nd = String(dt.getDate()).padStart(2, '0');
+        setDailySheetDate(`${ny}-${nm}-${nd}`);
+      }
+    } catch {}
   };
 
   // Quick Add Patient state
@@ -3006,7 +3030,7 @@ export default function Billing() {
   const dailySheetPreviewData = useMemo(() => {
     const targetDate = dailySheetDate || getTodayDateString();
 
-    const dayBills = bills.filter((b: any) => {
+    const allDayBills = bills.filter((b: any) => {
       let bDateStr = '';
       const rawDate = b.date || b.created_at || b.created_date || b.invoice_date;
       if (rawDate) {
@@ -3034,6 +3058,10 @@ export default function Billing() {
       if (dailySheetPaymentMode !== 'all' && !pMode.includes(dailySheetPaymentMode.toLowerCase())) return false;
 
       return true;
+    }).sort((a: any, b: any) => {
+      const timeA = new Date(a.created_at || a.date || 0).getTime();
+      const timeB = new Date(b.created_at || b.date || 0).getTime();
+      return timeA - timeB;
     });
 
     let gross = 0;
@@ -3045,7 +3073,9 @@ export default function Billing() {
     let card = 0;
     let bank = 0;
 
-    dayBills.forEach((b: any) => {
+    const deptBreakdown: Record<string, { count: number; gross: number; paid: number }> = {};
+
+    allDayBills.forEach((b: any) => {
       const g = Number(b.total_amount ?? b.totalAmount ?? b.total ?? 0);
       const d = Number(b.discount ?? b.discount_amount ?? 0);
       const payable = Number(b.payable_amount ?? b.payableAmount ?? Math.max(0, g - d));
@@ -3062,10 +3092,33 @@ export default function Billing() {
       else if (m.includes('upi') || m.includes('qr')) upi += p;
       else if (m.includes('card') || m.includes('pos')) card += p;
       else if (m.includes('bank') || m.includes('neft') || m.includes('rtgs')) bank += p;
+
+      const deptInfo = getBillDepartmentAndType(b);
+      const dName = (deptInfo.departmentName || b.department || b.category || b.type || 'General').toUpperCase();
+      if (!deptBreakdown[dName]) {
+        deptBreakdown[dName] = { count: 0, gross: 0, paid: 0 };
+      }
+      deptBreakdown[dName].count += 1;
+      deptBreakdown[dName].gross += g;
+      deptBreakdown[dName].paid += p;
+    });
+
+    const dayBills = allDayBills.filter((b: any) => {
+      if (!dailySheetSearch.trim()) return true;
+      const q = dailySheetSearch.toLowerCase().trim();
+      const pat = getBillPatientInfo(b);
+      const invId = (activeInvoiceMap[b.id] || sequentialIdMap[b.id] || b.id || '').toLowerCase();
+      const deptInfo = getBillDepartmentAndType(b);
+      const dept = (deptInfo.departmentName || b.department || b.category || '').toLowerCase();
+      const name = (pat.name || '').toLowerCase();
+      const phone = (pat.phone || '').toLowerCase();
+      const mrn = (pat.mrn || '').toLowerCase();
+      return name.includes(q) || phone.includes(q) || mrn.includes(q) || invId.includes(q) || dept.includes(q);
     });
 
     return {
-      count: dayBills.length,
+      count: allDayBills.length,
+      filteredCount: dayBills.length,
       gross,
       discount,
       paid,
@@ -3074,18 +3127,94 @@ export default function Billing() {
       upi,
       card,
       bank,
-      dayBills
+      deptBreakdown,
+      dayBills,
+      allDayBills
     };
-  }, [bills, dailySheetDate, dailySheetDept, dailySheetPaymentMode]);
+  }, [bills, dailySheetDate, dailySheetDept, dailySheetPaymentMode, dailySheetSearch, activeInvoiceMap, sequentialIdMap]);
+
+  const exportDailySheetCsv = () => {
+    const list = dailySheetPreviewData.allDayBills || [];
+    if (list.length === 0) {
+      toast.error('No records to export for ' + dailySheetDate);
+      return;
+    }
+
+    const headers = [
+      'Sl No',
+      'Invoice ID',
+      'Date',
+      'Time',
+      'Patient Name',
+      'MRN',
+      'Gender',
+      'Age',
+      'Phone',
+      'Department',
+      'Payment Mode',
+      'Gross Amount (INR)',
+      'Discount (INR)',
+      'Net Paid (INR)',
+      'Pending Due (INR)',
+      'Status'
+    ];
+
+    const rows = list.map((b: any, index: number) => {
+      const pat = getBillPatientInfo(b);
+      const invId = activeInvoiceMap[b.id] || sequentialIdMap[b.id] || b.id;
+      const deptInfo = getBillDepartmentAndType(b);
+      const dept = deptInfo.departmentName || b.department || b.category || 'General';
+      const gross = Number(b.total_amount ?? b.totalAmount ?? b.total ?? 0);
+      const disc = Number(b.discount ?? b.discount_amount ?? 0);
+      const payable = Number(b.payable_amount ?? b.payableAmount ?? Math.max(0, gross - disc));
+      const paid = Number(b.paid_amount ?? b.paidAmount ?? (b.status === 'Paid' ? payable : 0));
+      const due = Number(b.due ?? b.due_amount ?? Math.max(0, payable - paid));
+      const status = b.status || (paid >= payable && payable > 0 ? 'Paid' : paid > 0 ? 'Partial' : 'Pending');
+
+      let timeStr = '--';
+      const rawDate = b.created_at || b.date || b.invoice_date;
+      if (rawDate) {
+        try {
+          const d = new Date(rawDate);
+          if (!isNaN(d.getTime())) {
+            timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+          }
+        } catch {}
+      }
+
+      return [
+        index + 1,
+        `"${invId}"`,
+        `"${dailySheetDate}"`,
+        `"${timeStr}"`,
+        `"${(pat.name || '').replace(/"/g, '""')}"`,
+        `"${pat.mrn || 'N/A'}"`,
+        `"${pat.gender || '-'}"`,
+        `"${pat.age || '-'}"`,
+        `"${pat.phone || '-'}"`,
+        `"${dept}"`,
+        `"${b.payment_method || b.paymentMethod || 'Cash'}"`,
+        gross,
+        disc,
+        paid,
+        due,
+        `"${status}"`
+      ].join(',');
+    });
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `Daily_Billing_Register_${dailySheetDate}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success(`Exported ${list.length} records to CSV`);
+  };
 
   const printBillingDailySheet = (targetDate?: string, deptFilter: string = 'all', modeFilter: string = 'all') => {
     const dateToPrint = targetDate || dailySheetDate || getTodayDateString();
-
-    const printWindow = window.open('', '_blank', 'width=1100,height=850');
-    if (!printWindow) {
-      toast.error('Please allow popups in your browser to print the Daily Sheet');
-      return;
-    }
 
     // Filter matching bills
     const dayBills = bills.filter((b: any) => {
@@ -3594,8 +3723,50 @@ export default function Billing() {
       </html>
     `;
 
-    printWindow.document.write(html);
-    printWindow.document.close();
+    let printWindow: Window | null = null;
+    try {
+      printWindow = window.open('', '_blank', 'width=1150,height=850');
+    } catch (e) {
+      console.warn('window.open blocked', e);
+    }
+
+    if (printWindow && !printWindow.closed) {
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      return;
+    }
+
+    // Fallback if popup blocked (common in sandboxed iframe previews)
+    try {
+      let iframe = document.getElementById('daily-sheet-print-frame') as HTMLIFrameElement;
+      if (!iframe) {
+        iframe = document.createElement('iframe');
+        iframe.id = 'daily-sheet-print-frame';
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
+      }
+      const doc = iframe.contentWindow?.document || iframe.contentDocument;
+      if (doc) {
+        doc.open();
+        doc.write(html);
+        doc.close();
+        setTimeout(() => {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        }, 500);
+        return;
+      }
+    } catch (err) {
+      console.error('Fallback print error', err);
+    }
+    toast.error('Unable to open print preview. Please check browser pop-up settings.');
   };
 
   if (loading) {
@@ -3898,155 +4069,696 @@ export default function Billing() {
         </DialogContent>
       </Dialog>
 
-      {/* MODAL: Print Daily Sheet Configuration & Instant Export */}
+      {/* MODAL: Full View Daily Sheet & Instant Export */}
       <Dialog open={isDailySheetModalOpen} onOpenChange={setIsDailySheetModalOpen}>
-        <DialogContent className="sm:max-w-[620px] rounded-2xl p-0 overflow-hidden shadow-2xl border border-slate-200">
-          <DialogHeader className="p-5 border-b bg-emerald-50/70">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-emerald-100 text-emerald-800 rounded-xl border border-emerald-200">
-                <Printer className="w-5 h-5" />
+        <DialogContent className="max-w-[96vw] xl:max-w-[1300px] w-[96vw] max-h-[92vh] h-[90vh] flex flex-col p-0 overflow-hidden rounded-2xl shadow-2xl border border-slate-200 bg-white">
+          <DialogHeader className="p-4 sm:p-5 border-b bg-gradient-to-r from-emerald-50/90 via-teal-50/60 to-slate-50 flex-shrink-0">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-emerald-600 text-white rounded-xl shadow-xs shrink-0">
+                  <Printer className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <DialogTitle className="text-base sm:text-lg font-black text-slate-900">
+                      Daily Billing & Cash Collection Sheet (Full Register)
+                    </DialogTitle>
+                    <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 font-bold text-[10px]">
+                      A4 Landscape Format
+                    </Badge>
+                  </div>
+                  <DialogDescription className="text-xs text-slate-600 mt-0.5">
+                    Official hospital daily revenue register, cash drawer audit, and department-wise ledger for {dailySheetDate}.
+                  </DialogDescription>
+                </div>
               </div>
-              <div>
-                <DialogTitle className="text-base font-bold text-slate-900">
-                  Print Daily Billing & Collection Sheet
-                </DialogTitle>
-                <DialogDescription className="text-xs text-slate-600 mt-0.5">
-                  Generate official hospital daily cash and billing register (A4 landscape format).
-                </DialogDescription>
+
+              {/* View Mode & Instant Action Buttons */}
+              <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                <div className="bg-white p-1 rounded-xl border border-slate-200 shadow-xs flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant={dailySheetViewMode === 'register' ? 'default' : 'ghost'}
+                    size="sm"
+                    className={`h-7 px-2.5 text-xs font-bold gap-1.5 ${
+                      dailySheetViewMode === 'register' 
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white' 
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    onClick={() => setDailySheetViewMode('register')}
+                  >
+                    <LayoutList className="w-3.5 h-3.5" />
+                    Register View
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={dailySheetViewMode === 'paper' ? 'default' : 'ghost'}
+                    size="sm"
+                    className={`h-7 px-2.5 text-xs font-bold gap-1.5 ${
+                      dailySheetViewMode === 'paper' 
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white' 
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    onClick={() => setDailySheetViewMode('paper')}
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    A4 Paper Preview
+                  </Button>
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={exportDailySheetCsv}
+                  className="h-8 text-xs font-bold gap-1.5 border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
+                  title="Export records to Excel CSV"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="hidden md:inline">Export CSV</span>
+                </Button>
+
+                <Button
+                  size="sm"
+                  className="h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs"
+                  onClick={() => printBillingDailySheet(dailySheetDate, dailySheetDept, dailySheetPaymentMode)}
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print Sheet</span>
+                </Button>
               </div>
             </div>
           </DialogHeader>
 
-          <div className="p-5 space-y-4">
-            {/* Date Selection and Quick Presets */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">Target Date</label>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setDailySheetDate(getTodayDateString())}
-                    className={`text-[10px] font-extrabold px-2.5 py-1 rounded-md border transition-all cursor-pointer ${
-                      dailySheetDate === getTodayDateString() 
-                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs' 
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    Today
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDailySheetDate(getYesterdayDateString())}
-                    className={`text-[10px] font-extrabold px-2.5 py-1 rounded-md border transition-all cursor-pointer ${
-                      dailySheetDate === getYesterdayDateString() 
-                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs' 
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    Yesterday
-                  </button>
-                </div>
-              </div>
-              <div className="relative">
+          {/* FILTER & DATE CONTROLS TOOLBAR */}
+          <div className="px-4 sm:px-5 py-3 border-b bg-slate-50/90 flex flex-wrap items-center justify-between gap-3 shrink-0">
+            {/* Target Date with Day Stepper & Quick Presets */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Date:</span>
+              <div className="flex items-center bg-white rounded-lg border border-slate-200 shadow-2xs overflow-hidden">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-7 rounded-none border-r border-slate-200 hover:bg-slate-100"
+                  onClick={() => changeDailySheetDate(-1)}
+                  title="Previous Day"
+                >
+                  <ChevronLeft className="w-4 h-4 text-slate-600" />
+                </Button>
                 <Input
                   type="date"
                   value={dailySheetDate}
                   onChange={(e) => setDailySheetDate(e.target.value)}
-                  className="h-10 text-xs font-bold bg-slate-50 border-slate-200 focus:bg-white"
+                  className="h-8 w-34 text-xs font-bold border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 px-2"
                 />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-7 rounded-none border-l border-slate-200 hover:bg-slate-100"
+                  onClick={() => changeDailySheetDate(1)}
+                  title="Next Day"
+                >
+                  <ChevronRight className="w-4 h-4 text-slate-600" />
+                </Button>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setDailySheetDate(getTodayDateString())}
+                  className={`text-[11px] font-bold px-2.5 py-1 rounded-md border transition-all cursor-pointer ${
+                    dailySheetDate === getTodayDateString() 
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs' 
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDailySheetDate(getYesterdayDateString())}
+                  className={`text-[11px] font-bold px-2.5 py-1 rounded-md border transition-all cursor-pointer ${
+                    dailySheetDate === getYesterdayDateString() 
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs' 
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  Yesterday
+                </button>
               </div>
             </div>
 
-            {/* Optional Department & Payment Mode Filters */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700">Department Scope</label>
+            {/* Department Scope & Payment Mode Dropdowns */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-slate-600">Dept:</span>
                 <Select value={dailySheetDept} onValueChange={setDailySheetDept}>
-                  <SelectTrigger className="h-9 text-xs bg-white border-slate-200 font-semibold">
+                  <SelectTrigger className="h-8 text-xs bg-white border-slate-200 font-semibold w-38">
                     <SelectValue placeholder="All Departments" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Hospital Departments</SelectItem>
+                    <SelectItem value="all">All Departments</SelectItem>
                     <SelectItem value="opd">OPD Consultations</SelectItem>
-                    <SelectItem value="ipd">IPD / Inpatient Ward</SelectItem>
+                    <SelectItem value="ipd">IPD / Inpatient</SelectItem>
                     <SelectItem value="pharmacy">Pharmacy</SelectItem>
-                    <SelectItem value="lab">Laboratory & Diagnostics</SelectItem>
+                    <SelectItem value="lab">Laboratory</SelectItem>
                     <SelectItem value="radiology">Radiology</SelectItem>
-                    <SelectItem value="endoscopy">Endoscopy & Procedures</SelectItem>
+                    <SelectItem value="endoscopy">Endoscopy</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700">Payment Mode</label>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-slate-600">Mode:</span>
                 <Select value={dailySheetPaymentMode} onValueChange={setDailySheetPaymentMode}>
-                  <SelectTrigger className="h-9 text-xs bg-white border-slate-200 font-semibold">
-                    <SelectValue placeholder="All Payment Modes" />
+                  <SelectTrigger className="h-8 text-xs bg-white border-slate-200 font-semibold w-36">
+                    <SelectValue placeholder="All Modes" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Payment Modes</SelectItem>
+                    <SelectItem value="all">All Modes</SelectItem>
                     <SelectItem value="cash">Cash Only</SelectItem>
                     <SelectItem value="upi">UPI / QR Scan</SelectItem>
                     <SelectItem value="card">Card (POS)</SelectItem>
-                    <SelectItem value="bank">Bank Transfer / NEFT</SelectItem>
+                    <SelectItem value="bank">Bank Transfer</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-            </div>
 
-            {/* Live Day Preview Card */}
-            <div className="bg-slate-900 text-white rounded-xl p-4 space-y-3 border border-slate-800 shadow-inner">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                  Summary for {dailySheetDate}
-                </span>
-                <Badge className="bg-emerald-500/20 text-emerald-300 font-mono text-xs border-emerald-500/30">
-                  {dailySheetPreviewData.count} Invoices Found
-                </Badge>
+              {/* Quick Search within the Day Register */}
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Input
+                  type="text"
+                  placeholder="Filter patient, MRN, inv #..."
+                  value={dailySheetSearch}
+                  onChange={(e) => setDailySheetSearch(e.target.value)}
+                  className="h-8 pl-8 pr-7 text-xs bg-white border-slate-200 font-medium w-44 sm:w-56 focus:w-64 transition-all"
+                />
+                {dailySheetSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setDailySheetSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
-                <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700/60">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase">Gross Billed</div>
-                  <div className="text-sm font-black text-white">{formatCurrency(dailySheetPreviewData.gross)}</div>
-                </div>
-                <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700/60">
-                  <div className="text-[10px] text-emerald-400 font-bold uppercase">Collected / Paid</div>
-                  <div className="text-sm font-black text-emerald-400">{formatCurrency(dailySheetPreviewData.paid)}</div>
-                </div>
-                <div className="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700/60">
-                  <div className="text-[10px] text-amber-400 font-bold uppercase">Pending Dues</div>
-                  <div className="text-sm font-black text-amber-300">{formatCurrency(dailySheetPreviewData.due)}</div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between text-[11px] text-slate-300 bg-slate-800/40 p-2 rounded-lg border border-slate-700/40">
-                <span>💵 Cash: <b className="text-white">{formatCurrency(dailySheetPreviewData.cash)}</b></span>
-                <span>📱 UPI: <b className="text-white">{formatCurrency(dailySheetPreviewData.upi)}</b></span>
-                <span>💳 Card: <b className="text-white">{formatCurrency(dailySheetPreviewData.card)}</b></span>
-              </div>
+              {(dailySheetDept !== 'all' || dailySheetPaymentMode !== 'all' || dailySheetSearch) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setDailySheetDept('all');
+                    setDailySheetPaymentMode('all');
+                    setDailySheetSearch('');
+                  }}
+                  className="h-8 text-[11px] text-slate-500 hover:text-slate-800 px-2"
+                >
+                  Reset
+                </Button>
+              )}
             </div>
           </div>
 
-          <DialogFooter className="p-4 border-t bg-slate-50/90 flex items-center justify-between gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 text-xs font-bold"
-              onClick={() => setIsDailySheetModalOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              className="h-9 gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer"
-              onClick={() => {
-                printBillingDailySheet(dailySheetDate, dailySheetDept, dailySheetPaymentMode);
-                setIsDailySheetModalOpen(false);
-              }}
-            >
-              <Printer className="w-4 h-4" />
-              Print Daily Sheet (A4 Landscape)
-            </Button>
+          {/* EXECUTIVE FINANCIAL SUMMARY STRIP */}
+          <div className="px-4 sm:px-5 py-2.5 bg-slate-900 text-white shrink-0 border-b border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-400 font-medium">Billed Invoices:</span>
+                  <Badge className="bg-emerald-500/20 text-emerald-300 font-mono font-bold text-xs border border-emerald-500/30">
+                    {dailySheetPreviewData.filteredCount} / {dailySheetPreviewData.count}
+                  </Badge>
+                </div>
+
+                <div className="h-4 w-px bg-slate-700 hidden sm:block" />
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-400 font-medium">Gross Billed:</span>
+                  <span className="font-bold text-white">{formatCurrency(dailySheetPreviewData.gross)}</span>
+                </div>
+
+                <div className="h-4 w-px bg-slate-700 hidden sm:block" />
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-400 font-medium">Discount:</span>
+                  <span className="font-bold text-amber-300">{formatCurrency(dailySheetPreviewData.discount)}</span>
+                </div>
+
+                <div className="h-4 w-px bg-slate-700 hidden sm:block" />
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-emerald-400 font-bold">Net Collections:</span>
+                  <span className="font-black text-emerald-300 text-sm">{formatCurrency(dailySheetPreviewData.paid)}</span>
+                </div>
+
+                <div className="h-4 w-px bg-slate-700 hidden sm:block" />
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-rose-400 font-medium">Pending Due:</span>
+                  <span className={`font-bold ${dailySheetPreviewData.due > 0 ? 'text-rose-300' : 'text-slate-400'}`}>
+                    {formatCurrency(dailySheetPreviewData.due)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Mode Breakdown Badges */}
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-300">
+                <span className="bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
+                  💵 Cash: <b className="text-white font-mono">{formatCurrency(dailySheetPreviewData.cash)}</b>
+                </span>
+                <span className="bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
+                  📱 UPI: <b className="text-white font-mono">{formatCurrency(dailySheetPreviewData.upi)}</b>
+                </span>
+                <span className="bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
+                  💳 Card: <b className="text-white font-mono">{formatCurrency(dailySheetPreviewData.card)}</b>
+                </span>
+                {dailySheetPreviewData.bank > 0 && (
+                  <span className="bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
+                    🏦 Bank: <b className="text-white font-mono">{formatCurrency(dailySheetPreviewData.bank)}</b>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Department Breakdown Chips (if available) */}
+            {Object.keys(dailySheetPreviewData.deptBreakdown).length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 mt-2 pt-2 border-t border-slate-800/80 text-[10px]">
+                <span className="text-slate-400 uppercase font-bold tracking-wider">Dept Totals:</span>
+                {Object.entries(dailySheetPreviewData.deptBreakdown).map(([dept, data]: [string, any]) => (
+                  <span key={dept} className="bg-slate-800/60 px-2 py-0.5 rounded text-slate-300 border border-slate-700/50">
+                    {dept}: <b className="text-emerald-400">{formatCurrency(data.paid)}</b> ({data.count})
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* MAIN FULL VIEW SCROLLABLE BODY */}
+          <div className="flex-1 overflow-y-auto p-4 bg-slate-100/60">
+            {dailySheetViewMode === 'register' ? (
+              /* TABULAR REGISTER VIEW */
+              <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+                {dailySheetPreviewData.dayBills.length === 0 ? (
+                  <div className="text-center py-16 px-4">
+                    <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-400">
+                      <Printer className="w-6 h-6" />
+                    </div>
+                    <h3 className="text-sm font-bold text-slate-800">No Billing Records Found</h3>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
+                      {dailySheetSearch 
+                        ? `No transactions match "${dailySheetSearch}" for ${dailySheetDate}. Try clearing your search.`
+                        : `No hospital billing transactions were registered on ${dailySheetDate} with the selected filters.`}
+                    </p>
+                    <div className="mt-4 flex items-center justify-center gap-2">
+                      {dailySheetSearch && (
+                        <Button size="sm" variant="outline" onClick={() => setDailySheetSearch('')} className="h-8 text-xs">
+                          Clear Search
+                        </Button>
+                      )}
+                      <Button 
+                        size="sm" 
+                        onClick={() => setDailySheetDate(getTodayDateString())} 
+                        className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                      >
+                        Go to Today's Register
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader className="bg-slate-50 border-b border-slate-200">
+                        <TableRow className="hover:bg-transparent text-[11px] font-bold text-slate-700">
+                          <TableHead className="w-10 text-center">#</TableHead>
+                          <TableHead className="w-28">Invoice ID</TableHead>
+                          <TableHead className="w-20">Time</TableHead>
+                          <TableHead className="min-w-[180px]">Patient Name & Demographics</TableHead>
+                          <TableHead className="w-28">Department</TableHead>
+                          <TableHead className="w-24">Pay Mode</TableHead>
+                          <TableHead className="w-24 text-right">Gross (₹)</TableHead>
+                          <TableHead className="w-20 text-right">Disc (₹)</TableHead>
+                          <TableHead className="w-24 text-right">Paid (₹)</TableHead>
+                          <TableHead className="w-20 text-right">Due (₹)</TableHead>
+                          <TableHead className="w-20 text-center">Status</TableHead>
+                          <TableHead className="w-14 text-center">Receipt</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody className="text-xs divide-y divide-slate-100">
+                        {dailySheetPreviewData.dayBills.map((b: any, index: number) => {
+                          const pat = getBillPatientInfo(b);
+                          const invId = activeInvoiceMap[b.id] || sequentialIdMap[b.id] || b.invoice_number || b.id || `INV-${index + 1}`;
+                          const deptInfo = getBillDepartmentAndType(b);
+                          const dept = deptInfo.departmentName || b.department || b.category || 'General';
+                          const gross = Number(b.total_amount ?? b.totalAmount ?? b.total ?? 0);
+                          const disc = Number(b.discount ?? b.discount_amount ?? 0);
+                          const payable = Number(b.payable_amount ?? b.payableAmount ?? Math.max(0, gross - disc));
+                          const paid = Number(b.paid_amount ?? b.paidAmount ?? (b.status === 'Paid' ? payable : 0));
+                          const due = Number(b.due ?? b.due_amount ?? Math.max(0, payable - paid));
+                          const isFullyPaid = paid >= payable && payable > 0;
+                          const isPartial = paid > 0 && paid < payable;
+                          const pMode = String(b.payment_method || b.paymentMethod || 'Cash');
+
+                          let timeStr = '--';
+                          const rawDate = b.created_at || b.date || b.invoice_date;
+                          if (rawDate) {
+                            try {
+                              const d = new Date(rawDate);
+                              if (!isNaN(d.getTime())) {
+                                timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+                              }
+                            } catch {}
+                          }
+
+                          return (
+                            <TableRow key={b.id || index} className="hover:bg-emerald-50/40 transition-colors group">
+                              <TableCell className="text-center font-mono text-[11px] text-slate-400 font-semibold">
+                                {index + 1}
+                              </TableCell>
+                              <TableCell>
+                                <div className="font-mono font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 inline-block text-[11px]">
+                                  {invId}
+                                </div>
+                              </TableCell>
+                              <TableCell className="font-mono text-slate-500 text-[11px]">
+                                {timeStr}
+                              </TableCell>
+                              <TableCell>
+                                <div>
+                                  <div className="font-bold text-slate-900 group-hover:text-emerald-950">
+                                    {pat.name || 'Walk-in Patient'}
+                                  </div>
+                                  <div className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5">
+                                    <span>MRN: <b className="font-mono text-slate-700">{pat.mrn || 'N/A'}</b></span>
+                                    {(pat.gender || pat.age) && (
+                                      <span>• {pat.gender || '-'}/{pat.age || '-'}</span>
+                                    )}
+                                    {pat.phone && pat.phone !== 'N/A' && (
+                                      <span>• {pat.phone}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="text-[10px] font-bold bg-slate-50 border-slate-200 text-slate-700">
+                                  {dept}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                                  pMode.toLowerCase().includes('cash') 
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                                    : pMode.toLowerCase().includes('upi')
+                                      ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                      : 'bg-purple-50 text-purple-800 border-purple-200'
+                                }`}>
+                                  {pMode}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right font-mono font-medium text-slate-700">
+                                {gross > 0 ? formatCurrency(gross) : '₹0.00'}
+                              </TableCell>
+                              <TableCell className="text-right font-mono text-amber-700 text-[11px]">
+                                {disc > 0 ? formatCurrency(disc) : '-'}
+                              </TableCell>
+                              <TableCell className="text-right font-mono font-black text-emerald-700">
+                                {formatCurrency(paid)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono font-bold">
+                                {due > 0 ? (
+                                  <span className="text-rose-600 bg-rose-50 px-1 py-0.5 rounded border border-rose-200">
+                                    {formatCurrency(due)}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">-</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge 
+                                  variant="outline"
+                                  className={`text-[9px] px-1.5 py-0 font-bold ${
+                                    isFullyPaid 
+                                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
+                                      : isPartial 
+                                        ? 'bg-amber-100 text-amber-800 border-amber-300' 
+                                        : 'bg-rose-100 text-rose-800 border-rose-300'
+                                  }`}
+                                >
+                                  {b.status || (isFullyPaid ? 'Paid' : isPartial ? 'Partial' : 'Pending')}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded"
+                                  onClick={() => printInvoice(b)}
+                                  title="Print Patient Bill Receipt"
+                                >
+                                  <Printer className="w-3.5 h-3.5" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                      {/* TABLE TOTALS FOOTER ROW */}
+                      <tfoot className="bg-slate-100/90 font-bold text-xs border-t-2 border-slate-300 text-slate-900">
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-right uppercase tracking-wider py-2.5 text-[11px] font-black text-slate-700">
+                            Total for {dailySheetDate} ({dailySheetPreviewData.dayBills.length} Invoices):
+                          </TableCell>
+                          <TableCell className="text-right font-mono font-black py-2.5">
+                            {formatCurrency(dailySheetPreviewData.gross)}
+                          </TableCell>
+                          <TableCell className="text-right font-mono font-bold text-amber-700 py-2.5">
+                            {formatCurrency(dailySheetPreviewData.discount)}
+                          </TableCell>
+                          <TableCell className="text-right font-mono font-black text-emerald-700 py-2.5 text-sm">
+                            {formatCurrency(dailySheetPreviewData.paid)}
+                          </TableCell>
+                          <TableCell className="text-right font-mono font-black text-rose-700 py-2.5">
+                            {formatCurrency(dailySheetPreviewData.due)}
+                          </TableCell>
+                          <TableCell colSpan={2} className="text-center text-[10px] text-emerald-800 font-bold">
+                            ALL VERIFIED
+                          </TableCell>
+                        </TableRow>
+                      </tfoot>
+                    </Table>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* A4 PAPER PREVIEW VIEW (Matches Exact Print Output) */
+              <div className="max-w-[1050px] mx-auto bg-white p-6 sm:p-8 rounded-xl shadow-lg border border-slate-300 text-slate-900 text-xs">
+                {/* Hospital Official Header */}
+                <div className="border-b-2 border-slate-800 pb-4 mb-4">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h1 className="text-xl font-black text-slate-900 uppercase tracking-tight">
+                        GASTRO & LIVER CARE HOSPITAL
+                      </h1>
+                      <div className="text-xs font-semibold text-emerald-800 mt-0.5">
+                        Center for Digestive Diseases, Endoscopy & Advanced Laparoscopy
+                      </div>
+                      <div className="text-[11px] text-slate-600 mt-1 space-y-0.5">
+                        <div>Plot No. 42, Health City, Medical Enclave, New Delhi - 110029</div>
+                        <div>Phone: +91 11 2659 8800 • Emergency: +91 11 2659 8899 • Email: billing@gastrocare.in</div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="inline-block bg-slate-900 text-white font-bold px-3 py-1 text-xs uppercase tracking-wider rounded">
+                        OFFICIAL REGISTER
+                      </div>
+                      <div className="text-xs font-bold text-slate-800 mt-2">
+                        DATE: <span className="font-mono text-emerald-800">{dailySheetDate}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500">
+                        Generated: {new Date().toLocaleTimeString()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-center mb-4">
+                  <h2 className="text-sm font-black uppercase tracking-widest text-slate-800 border-b border-slate-200 pb-1.5 inline-block px-4">
+                    DAILY BILLING & CASH COLLECTION REGISTER
+                  </h2>
+                </div>
+
+                {/* Paper Metrics Grid */}
+                <div className="grid grid-cols-5 gap-2 mb-4">
+                  <div className="border border-slate-200 p-2 rounded bg-slate-50 text-center">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase">Total Invoices</div>
+                    <div className="text-base font-black text-slate-900">{dailySheetPreviewData.count}</div>
+                  </div>
+                  <div className="border border-slate-200 p-2 rounded bg-slate-50 text-center">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase">Gross Billed</div>
+                    <div className="text-base font-black text-slate-900">{formatCurrency(dailySheetPreviewData.gross)}</div>
+                  </div>
+                  <div className="border border-slate-200 p-2 rounded bg-slate-50 text-center">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase">Total Discounts</div>
+                    <div className="text-base font-black text-amber-700">{formatCurrency(dailySheetPreviewData.discount)}</div>
+                  </div>
+                  <div className="border border-emerald-200 p-2 rounded bg-emerald-50 text-center">
+                    <div className="text-[10px] text-emerald-800 font-bold uppercase">Net Collections</div>
+                    <div className="text-base font-black text-emerald-700">{formatCurrency(dailySheetPreviewData.paid)}</div>
+                  </div>
+                  <div className="border border-slate-200 p-2 rounded bg-slate-50 text-center">
+                    <div className="text-[10px] text-slate-500 font-bold uppercase">Pending Dues</div>
+                    <div className="text-base font-black text-rose-700">{formatCurrency(dailySheetPreviewData.due)}</div>
+                  </div>
+                </div>
+
+                {/* Paper Payment Modes Strip */}
+                <div className="flex items-center justify-between bg-slate-100 border border-slate-200 p-2 rounded mb-4 text-[11px] font-bold">
+                  <span>💵 Cash in Hand: <b className="font-mono text-slate-900">{formatCurrency(dailySheetPreviewData.cash)}</b></span>
+                  <span>📱 UPI / QR Scan: <b className="font-mono text-slate-900">{formatCurrency(dailySheetPreviewData.upi)}</b></span>
+                  <span>💳 Card (POS Terminal): <b className="font-mono text-slate-900">{formatCurrency(dailySheetPreviewData.card)}</b></span>
+                  <span>🏦 Bank Transfer / NEFT: <b className="font-mono text-slate-900">{formatCurrency(dailySheetPreviewData.bank)}</b></span>
+                </div>
+
+                {/* Itemized Table on Paper */}
+                <table className="w-full text-[10px] border-collapse border border-slate-300 mb-6">
+                  <thead>
+                    <tr className="bg-slate-200 text-slate-800 font-bold">
+                      <th className="border border-slate-300 p-1 text-center w-8">#</th>
+                      <th className="border border-slate-300 p-1 text-left w-24">Invoice #</th>
+                      <th className="border border-slate-300 p-1 text-left w-16">Time</th>
+                      <th className="border border-slate-300 p-1 text-left">Patient Details</th>
+                      <th className="border border-slate-300 p-1 text-left w-20">Dept</th>
+                      <th className="border border-slate-300 p-1 text-center w-16">Mode</th>
+                      <th className="border border-slate-300 p-1 text-right w-20">Gross (₹)</th>
+                      <th className="border border-slate-300 p-1 text-right w-16">Disc (₹)</th>
+                      <th className="border border-slate-300 p-1 text-right w-20">Paid (₹)</th>
+                      <th className="border border-slate-300 p-1 text-right w-16">Due (₹)</th>
+                      <th className="border border-slate-300 p-1 text-center w-16">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dailySheetPreviewData.dayBills.map((b: any, index: number) => {
+                      const pat = getBillPatientInfo(b);
+                      const invId = activeInvoiceMap[b.id] || sequentialIdMap[b.id] || b.invoice_number || b.id;
+                      const deptInfo = getBillDepartmentAndType(b);
+                      const dept = deptInfo.departmentName || b.department || b.category || 'General';
+                      const gross = Number(b.total_amount ?? b.totalAmount ?? b.total ?? 0);
+                      const disc = Number(b.discount ?? b.discount_amount ?? 0);
+                      const payable = Number(b.payable_amount ?? b.payableAmount ?? Math.max(0, gross - disc));
+                      const paid = Number(b.paid_amount ?? b.paidAmount ?? (b.status === 'Paid' ? payable : 0));
+                      const due = Number(b.due ?? b.due_amount ?? Math.max(0, payable - paid));
+
+                      let timeStr = '--';
+                      const rawDate = b.created_at || b.date || b.invoice_date;
+                      if (rawDate) {
+                        try {
+                          const d = new Date(rawDate);
+                          if (!isNaN(d.getTime())) {
+                            timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+                          }
+                        } catch {}
+                      }
+
+                      return (
+                        <tr key={b.id || index} className={index % 2 === 1 ? 'bg-slate-50' : 'bg-white'}>
+                          <td className="border border-slate-300 p-1 text-center font-mono">{index + 1}</td>
+                          <td className="border border-slate-300 p-1 font-mono font-bold">{invId}</td>
+                          <td className="border border-slate-300 p-1 font-mono text-slate-600">{timeStr}</td>
+                          <td className="border border-slate-300 p-1">
+                            <span className="font-bold">{pat.name || 'Registered Patient'}</span>
+                            <span className="text-slate-500 text-[9px] ml-1">({pat.mrn || 'N/A'}, {pat.phone || '-'})</span>
+                          </td>
+                          <td className="border border-slate-300 p-1">{dept}</td>
+                          <td className="border border-slate-300 p-1 text-center font-semibold">{b.payment_method || 'Cash'}</td>
+                          <td className="border border-slate-300 p-1 text-right font-mono">{gross.toLocaleString('en-IN')}</td>
+                          <td className="border border-slate-300 p-1 text-right font-mono text-amber-700">{disc > 0 ? disc.toLocaleString('en-IN') : '-'}</td>
+                          <td className="border border-slate-300 p-1 text-right font-mono font-bold text-emerald-800">{paid.toLocaleString('en-IN')}</td>
+                          <td className="border border-slate-300 p-1 text-right font-mono">{due > 0 ? due.toLocaleString('en-IN') : '-'}</td>
+                          <td className="border border-slate-300 p-1 text-center font-bold text-[9px] text-emerald-800">
+                            {b.status || 'PAID'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-200 font-bold text-[10px]">
+                      <td colSpan={6} className="border border-slate-300 p-1.5 text-right uppercase">
+                        TOTAL REGISTER SUMMARY ({dailySheetPreviewData.dayBills.length} INVOICES):
+                      </td>
+                      <td className="border border-slate-300 p-1.5 text-right font-mono">₹{dailySheetPreviewData.gross.toLocaleString('en-IN')}</td>
+                      <td className="border border-slate-300 p-1.5 text-right font-mono text-amber-800">₹{dailySheetPreviewData.discount.toLocaleString('en-IN')}</td>
+                      <td className="border border-slate-300 p-1.5 text-right font-mono text-emerald-900 font-black">₹{dailySheetPreviewData.paid.toLocaleString('en-IN')}</td>
+                      <td className="border border-slate-300 p-1.5 text-right font-mono text-rose-800">₹{dailySheetPreviewData.due.toLocaleString('en-IN')}</td>
+                      <td className="border border-slate-300 p-1.5 text-center text-emerald-800">VERIFIED</td>
+                    </tr>
+                  </tfoot>
+                </table>
+
+                {/* Signatures Footer */}
+                <div className="grid grid-cols-3 gap-8 pt-8 border-t border-slate-300 text-center">
+                  <div>
+                    <div className="border-t border-dashed border-slate-400 w-40 mx-auto mb-1"></div>
+                    <div className="font-bold text-slate-800">Cashier / Billing Clerk</div>
+                    <div className="text-[10px] text-slate-500">Prepared & Cash Drawer Checked</div>
+                  </div>
+                  <div>
+                    <div className="border-t border-dashed border-slate-400 w-40 mx-auto mb-1"></div>
+                    <div className="font-bold text-slate-800">Hospital Accountant</div>
+                    <div className="text-[10px] text-slate-500">Audited & Reconciled with Bank/POS</div>
+                  </div>
+                  <div>
+                    <div className="border-t border-dashed border-slate-400 w-40 mx-auto mb-1"></div>
+                    <div className="font-bold text-slate-800">Medical Superintendent</div>
+                    <div className="text-[10px] text-slate-500">Authorized Signatory & Seal</div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* STICKY FOOTER ACTION BAR */}
+          <DialogFooter className="p-3.5 sm:p-4 border-t bg-white flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+            <div className="text-xs text-slate-600 flex items-center gap-2">
+              <span>Date: <b className="text-slate-900">{dailySheetDate}</b></span>
+              <span>•</span>
+              <span>Showing <b className="text-slate-900">{dailySheetPreviewData.filteredCount}</b> of <b className="text-slate-900">{dailySheetPreviewData.count}</b> records</span>
+              <span>•</span>
+              <span>Total Collections: <b className="text-emerald-700">{formatCurrency(dailySheetPreviewData.paid)}</b></span>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-center">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 text-xs font-bold"
+                onClick={() => setIsDailySheetModalOpen(false)}
+              >
+                Close
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportDailySheetCsv}
+                className="h-9 text-xs font-bold gap-1.5 border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                Export CSV
+              </Button>
+
+              <Button
+                className="h-9 gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer"
+                onClick={() => printBillingDailySheet(dailySheetDate, dailySheetDept, dailySheetPaymentMode)}
+              >
+                <Printer className="w-4 h-4" />
+                Print Daily Sheet (A4 Landscape)
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
