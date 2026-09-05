@@ -1000,15 +1000,26 @@ export default function App() {
     const saved = storage.get<any>(STORAGE_KEYS.HOSPITAL_INFO, null);
     if (saved) {
       let changed = false;
-      let name = saved.name;
-      let address = saved.address;
-      if (name && (/\bNEW\b/i.test(name) || (name.toLowerCase().includes('gastro plus') && !name.toUpperCase().includes('NEO GASTRO PLUS')))) {
-        name = name.replace(/\bNEW\b/gi, 'NEO').replace(/gastro\s*plus/gi, 'NEO GASTRO PLUS');
-        if (!name.toUpperCase().includes('HOSPITAL')) {
-          name += ' HOSPITAL';
-        }
+      let name = saved.name || '';
+      let address = saved.address || '';
+      
+      // Clean duplicate or legacy names (e.g. "NEO NEO NEO", "NEO NEO")
+      const cleanedName = name
+        .replace(/\b(NEO\s*)+/gi, 'NEO ')
+        .replace(/\bNEW\b/gi, 'NEO');
+      let finalName = cleanedName;
+      if (!/\bNEO\b/i.test(finalName) && /gastro\s*plus/i.test(finalName)) {
+        finalName = finalName.replace(/gastro\s*plus/gi, 'NEO GASTRO PLUS');
+      }
+      finalName = finalName.replace(/\b(NEO\s*)+/gi, 'NEO ').trim();
+      if (!finalName.toUpperCase().includes('HOSPITAL')) {
+        finalName += ' HOSPITAL';
+      }
+      if (finalName !== name) {
+        name = finalName;
         changed = true;
       }
+
       if (address && /\bNEW\b/i.test(address)) {
         address = address.replace(/\bNEW\b/gi, 'Neo');
         changed = true;
@@ -1084,12 +1095,25 @@ export default function App() {
       const currentHosp = storage.get<any>(STORAGE_KEYS.HOSPITAL_INFO, null);
       if (currentHosp) {
         let changed = false;
-        let name = currentHosp.name;
-        let address = currentHosp.address;
-        if (name && /\bNEW\b/i.test(name)) {
-          name = name.replace(/\bNEW\b/gi, 'NEO');
+        let name = currentHosp.name || '';
+        let address = currentHosp.address || '';
+        
+        const cleanedName = name
+          .replace(/\b(NEO\s*)+/gi, 'NEO ')
+          .replace(/\bNEW\b/gi, 'NEO');
+        let finalName = cleanedName;
+        if (!/\bNEO\b/i.test(finalName) && /gastro\s*plus/i.test(finalName)) {
+          finalName = finalName.replace(/gastro\s*plus/gi, 'NEO GASTRO PLUS');
+        }
+        finalName = finalName.replace(/\b(NEO\s*)+/gi, 'NEO ').trim();
+        if (!finalName.toUpperCase().includes('HOSPITAL')) {
+          finalName += ' HOSPITAL';
+        }
+        if (finalName !== name) {
+          name = finalName;
           changed = true;
         }
+
         if (address && /\bNEW\b/i.test(address)) {
           address = address.replace(/\bNEW\b/gi, 'Neo');
           changed = true;

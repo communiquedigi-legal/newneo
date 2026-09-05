@@ -110,7 +110,7 @@ import {
   SelectValue 
 } from '@/components/ui/select';
 import { MOCK_USERS } from '@/mockData';
-import { formatDate, getAppointmentTimestamp, cn } from '@/lib/utils';
+import { formatDate, getAppointmentTimestamp, cn, getAppointmentFinancials, cleanHospitalName } from '@/lib/utils';
 import { toast } from 'sonner';
 import { storage, STORAGE_KEYS } from '@/lib/storage';
 import { playNotificationSound } from '@/lib/notifications';
@@ -1475,7 +1475,7 @@ export default function OPD() {
     const saved = storage.get<any>(STORAGE_KEYS.HOSPITAL_INFO, null);
     if (saved) {
       let name = saved.name || 'NEO GASTRO PLUS HOSPITAL';
-      if (/\bNEW\b/i.test(name)) name = name.replace(/\bNEW\b/gi, 'NEO');
+      name = name.replace(/\b(NEO\s*)+/gi, 'NEO ').replace(/\bNEW\b/gi, 'NEO').trim();
       let address = saved.address;
       if (address && /\bNEW\b/i.test(address)) address = address.replace(/\bNEW\b/gi, 'Neo');
       return { ...saved, name, address };
@@ -4337,23 +4337,7 @@ export default function OPD() {
   };
 
   const getAppointmentFeeValue = (aptItem: any) => {
-    if (aptItem.fee !== undefined && aptItem.fee !== null && !isNaN(Number(aptItem.fee)) && Number(aptItem.fee) > 0) {
-      return Number(aptItem.fee);
-    }
-    if (aptItem.payable_amount !== undefined && aptItem.payable_amount !== null && !isNaN(Number(aptItem.payable_amount)) && Number(aptItem.payable_amount) > 0) {
-      return Number(aptItem.payable_amount);
-    }
-    if (aptItem.paid_amount !== undefined && aptItem.paid_amount !== null && !isNaN(Number(aptItem.paid_amount)) && Number(aptItem.paid_amount) > 0) {
-      return Number(aptItem.paid_amount);
-    }
-    if (aptItem.amount !== undefined && aptItem.amount !== null && !isNaN(Number(aptItem.amount)) && Number(aptItem.amount) > 0) {
-      return Number(aptItem.amount);
-    }
-    const doc = findDoctor(aptItem.doctor || aptItem.doctorName || aptItem.doctorId || aptItem.doctor_id);
-    if (doc && doc.consultationFee !== undefined && doc.consultationFee !== null && !isNaN(Number(doc.consultationFee))) {
-      return Number(doc.consultationFee);
-    }
-    return (storage.get(STORAGE_KEYS.OPD_CHARGES, { consult: 500 }).consult || 500);
+    return getAppointmentFinancials(aptItem, allDoctors).baseFee;
   };
 
   const buildAppointmentSlipData = (apt: any): AppointmentSlipData => {
@@ -4447,13 +4431,19 @@ export default function OPD() {
     const totalBookings = list.length;
     const routineCount = list.filter(a => (a.urgency || 'Routine') === 'Routine').length;
     const urgentCount = list.filter(a => a.urgency === 'Urgent' || a.urgency === 'Emergency').length;
-    const totalFees = list.reduce((sum, a) => {
-      const base = getAppointmentFeeValue(a);
-      const discount = Number(a.discount_amount || a.discountAmount || 0);
-      return sum + Math.max(0, base - discount);
-    }, 0);
+    
+    let totalGross = 0;
+    let totalDiscounts = 0;
+    let totalFees = 0;
 
-    const hospName = hospitalInfo?.name || 'NEO GASTRO PLUS HOSPITAL';
+    list.forEach(a => {
+      const fin = getAppointmentFinancials(a, allDoctors);
+      totalGross += fin.baseFee;
+      totalDiscounts += fin.discount;
+      totalFees += fin.paidAmount;
+    });
+
+    const hospName = cleanHospitalName(hospitalInfo?.name);
     const hospAddr = hospitalInfo?.address || 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh';
     const hospPhone = hospitalInfo?.phone || '9109102145/9109101246';
     const hospEmail = hospitalInfo?.email || 'gatroplusbhopal@gmail.com';
@@ -4651,23 +4641,33 @@ export default function OPD() {
               <div class="meta-val">${totalBookings} Patients (${routineCount} Routine, ${urgentCount} Urgent)</div>
             </div>
             <div class="meta-item">
-              <div class="meta-label">Total OPD Fees</div>
-              <div class="meta-val" style="color: #0f766e;">₹${totalFees.toLocaleString('en-IN')}</div>
+              <div class="meta-label">Base Fees</div>
+              <div class="meta-val" style="color: #0369a1;">₹${totalGross.toLocaleString('en-IN')}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label">Total Discount</div>
+              <div class="meta-val" style="color: #c2410c;">${totalDiscounts > 0 ? `-₹${totalDiscounts.toLocaleString('en-IN')}` : '₹0'}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label">Payment Received</div>
+              <div class="meta-val" style="color: #15803d; font-weight: 800;">₹${totalFees.toLocaleString('en-IN')}</div>
             </div>
           </div>
 
           <table class="register-table">
             <thead>
               <tr>
-                <th style="width: 7%; text-align: center;">Token</th>
-                <th style="width: 9%;">Time</th>
-                <th style="width: 13%;">MRN</th>
-                <th style="width: 18%;">Patient Name</th>
-                <th style="width: 9%;">Age/Gen</th>
-                <th style="width: 12%;">Contact</th>
-                <th style="width: 17%;">Doctor</th>
-                <th style="width: 7%;">Urgency</th>
-                <th style="width: 8%; text-align: right;">Fee (₹)</th>
+                <th style="width: 6%; text-align: center;">Token</th>
+                <th style="width: 8%;">Time</th>
+                <th style="width: 11%;">MRN</th>
+                <th style="width: 16%;">Patient Name</th>
+                <th style="width: 8%;">Age/Gen</th>
+                <th style="width: 10%;">Contact</th>
+                <th style="width: 14%;">Doctor</th>
+                <th style="width: 6%;">Urgency</th>
+                <th style="width: 7%; text-align: right;">Base Price</th>
+                <th style="width: 7%; text-align: right;">Discount</th>
+                <th style="width: 7%; text-align: right;">Payment Received</th>
               </tr>
             </thead>
             <tbody>
@@ -4683,10 +4683,7 @@ export default function OPD() {
                 const tokenNum = opdTokenMap[apt.id] ? `TK-${opdTokenMap[apt.id]}` : `TK-${idx + 1}`;
                 const urgency = apt.urgency || 'Routine';
                 const urgencyClass = urgency === 'Emergency' ? 'badge-emergency' : urgency === 'Urgent' ? 'badge-urgent' : 'badge-routine';
-                const baseFee = getAppointmentFeeValue(apt);
-                const discountAmt = Number(apt.discount_amount || apt.discountAmount || 0);
-                const netFee = Math.max(0, baseFee - discountAmt);
-                const isPaid = apt.payment_status === 'Paid';
+                const fin = getAppointmentFinancials(apt, allDoctors);
 
                 return `
                   <tr>
@@ -4698,18 +4695,21 @@ export default function OPD() {
                     <td>${patPhone}</td>
                     <td>${docName}</td>
                     <td><span class="badge ${urgencyClass}">${urgency}</span></td>
-                    <td style="text-align: right; font-weight: 600;">
-                      <div>₹${netFee.toLocaleString('en-IN')}</div>
-                      ${discountAmt > 0 ? `<div style="font-size: 8.5px; color: #c2410c; font-weight: 700;">(Disc -₹${discountAmt})</div>` : ''}
-                      <div style="font-size: 8px; color: ${isPaid ? '#166534' : '#9a3412'}; font-weight: 800; text-transform: uppercase;">
-                        ${isPaid ? 'PAID' : 'PENDING'}
+                    <td style="text-align: right; font-weight: 600;">₹${fin.baseFee.toLocaleString('en-IN')}</td>
+                    <td style="text-align: right; font-weight: 600; color: ${fin.discount > 0 ? '#c2410c' : '#64748b'};">
+                      ${fin.discount > 0 ? `-₹${fin.discount.toLocaleString('en-IN')}` : '₹0'}
+                    </td>
+                    <td style="text-align: right; font-weight: 700;">
+                      <div style="font-size: 11px; color: #0f172a;">₹${fin.paidAmount.toLocaleString('en-IN')}</div>
+                      <div style="font-size: 8px; color: ${fin.isFullyRefunded ? '#e11d48' : fin.isPaid ? '#166534' : '#9a3412'}; font-weight: 800; text-transform: uppercase;">
+                        ${fin.isFullyRefunded ? 'REFUNDED' : fin.isPaid ? 'PAID' : 'PENDING'}
                       </div>
                     </td>
                   </tr>
                 `;
               }).join('') : `
                 <tr>
-                  <td colspan="9" style="text-align: center; padding: 20px; color: #64748b;">
+                  <td colspan="11" style="text-align: center; padding: 20px; color: #64748b;">
                     No Outpatient Appointments scheduled for this date.
                   </td>
                 </tr>
@@ -4718,9 +4718,10 @@ export default function OPD() {
           </table>
 
           <div class="summary-bar">
-            <div>TOTAL REGISTERED PATIENTS: <strong>${totalBookings}</strong></div>
-            <div>ROUTINE: <strong>${routineCount}</strong> | URGENT/EMERGENCY: <strong>${urgentCount}</strong></div>
-            <div>ESTIMATED REVENUE: <strong>₹${totalFees.toLocaleString('en-IN')}</strong></div>
+            <div>TOTAL PATIENTS: <strong>${totalBookings}</strong></div>
+            <div>BASE FEES: <strong>₹${totalGross.toLocaleString('en-IN')}</strong></div>
+            <div>DISCOUNTS: <strong>-₹${totalDiscounts.toLocaleString('en-IN')}</strong></div>
+            <div>PAYMENT RECEIVED: <strong>₹${totalFees.toLocaleString('en-IN')}</strong></div>
           </div>
 
           <div class="signature-section">
@@ -7017,18 +7018,23 @@ export default function OPD() {
                                   : 'Pending'
                             }
                           </Badge>
-                          <div className="text-[11px] space-y-0.5 text-slate-600 font-medium">
-                            <div>Base Fee: <span className="font-semibold text-slate-800">₹{apt.fee || appointmentFee}</span></div>
-                            {(apt.discount_amount || apt.discountAmount || 0) > 0 && (
-                              <div className="text-amber-600 font-semibold">Discount: <span>-₹{apt.discount_amount || apt.discountAmount}</span></div>
-                            )}
-                            {(apt.refund_amount || apt.refundAmount || 0) > 0 && (
-                              <div className="text-rose-600 font-semibold">Refunded: <span>-₹{apt.refund_amount || apt.refundAmount}</span></div>
-                            )}
-                            <div className="border-t border-slate-100 pt-0.5 text-emerald-600 font-bold">
-                              Net: <span>₹{Math.max(0, (Number(apt.fee || appointmentFee) - Number(apt.discount_amount || apt.discountAmount || 0)) - Number(apt.refund_amount || apt.refundAmount || (apt.payment_status === 'Refunded' ? (Number(apt.fee || appointmentFee) - Number(apt.discount_amount || apt.discountAmount || 0)) : 0)))}</span>
-                            </div>
-                          </div>
+                          {(() => {
+                            const fin = getAppointmentFinancials(apt, allDoctors);
+                            return (
+                              <div className="text-[11px] space-y-0.5 text-slate-600 font-medium">
+                                <div>Base Price: <span className="font-semibold text-slate-800">₹{fin.baseFee}</span></div>
+                                {fin.discount > 0 && (
+                                  <div className="text-amber-600 font-semibold">Discount: <span>-₹{fin.discount}</span></div>
+                                )}
+                                {fin.refundAmt > 0 && (
+                                  <div className="text-rose-600 font-semibold">Refunded: <span>-₹{fin.refundAmt}</span></div>
+                                )}
+                                <div className="border-t border-slate-100 pt-0.5 text-emerald-600 font-bold">
+                                  Payment Received: <span>₹{fin.paidAmount}</span>
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </TableCell>
                       <TableCell className="whitespace-nowrap">

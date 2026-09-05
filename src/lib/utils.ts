@@ -294,5 +294,116 @@ export function buildDateWiseInvoiceMap(bills: any[], prefix: string = 'INV'): R
   return buildSequentialInvoiceMap(bills, prefix);
 }
 
+export function cleanHospitalName(rawName: string | null | undefined): string {
+  if (!rawName) return 'NEO GASTRO PLUS HOSPITAL';
+  let name = String(rawName).trim();
+  name = name.replace(/\b(NEO\s*)+/gi, 'NEO ').replace(/\bNEW\b/gi, 'NEO');
+  if (!/\bNEO\b/i.test(name) && /gastro\s*plus/i.test(name)) {
+    name = name.replace(/gastro\s*plus/gi, 'NEO GASTRO PLUS');
+  }
+  name = name.replace(/\b(NEO\s*)+/gi, 'NEO ').trim();
+  if (!name.toUpperCase().includes('HOSPITAL')) {
+    name += ' HOSPITAL';
+  }
+  return name.trim();
+}
+
+export interface AppointmentFinancials {
+  baseFee: number;
+  discount: number;
+  refundAmt: number;
+  netPayable: number;
+  paidAmount: number;
+  isPaid: boolean;
+  isFullyRefunded: boolean;
+  isPartiallyRefunded: boolean;
+}
+
+export function getAppointmentFinancials(apt: any, fallbackDoctorList?: any[]): AppointmentFinancials {
+  if (!apt) {
+    return {
+      baseFee: 500,
+      discount: 0,
+      refundAmt: 0,
+      netPayable: 500,
+      paidAmount: 500,
+      isPaid: true,
+      isFullyRefunded: false,
+      isPartiallyRefunded: false
+    };
+  }
+
+  // 1. Determine Base Fee (Gross)
+  let baseFee = 0;
+  if (apt.fee !== undefined && apt.fee !== null && !isNaN(Number(apt.fee)) && Number(apt.fee) > 0) {
+    baseFee = Number(apt.fee);
+  } else if (apt.base_fee !== undefined && apt.base_fee !== null && !isNaN(Number(apt.base_fee)) && Number(apt.base_fee) > 0) {
+    baseFee = Number(apt.base_fee);
+  } else if (apt.consultation_fee !== undefined && apt.consultation_fee !== null && !isNaN(Number(apt.consultation_fee)) && Number(apt.consultation_fee) > 0) {
+    baseFee = Number(apt.consultation_fee);
+  } else if (apt.total_amount !== undefined && apt.total_amount !== null && !isNaN(Number(apt.total_amount)) && Number(apt.total_amount) > 0) {
+    baseFee = Number(apt.total_amount);
+  } else {
+    // Check doctor fee
+    const docNameOrId = String(apt.doctor || apt.doctorName || apt.doctorId || apt.doctor_id || '').toLowerCase().trim();
+    if (docNameOrId) {
+      const cleanDoc = docNameOrId.replace(/^dr\.?\s*/i, '').trim();
+      if (cleanDoc.includes('tiwari') || cleanDoc.includes('anirudh')) {
+        baseFee = 600;
+      } else if (cleanDoc.includes('rajesh') || cleanDoc.includes('sharma')) {
+        baseFee = 800;
+      } else if (Array.isArray(fallbackDoctorList) && fallbackDoctorList.length > 0) {
+        const found = fallbackDoctorList.find((d: any) => {
+          const dName = String(d.name || d.id || '').toLowerCase().replace(/^dr\.?\s*/i, '').trim();
+          return dName && (dName === cleanDoc || dName.includes(cleanDoc) || cleanDoc.includes(dName));
+        });
+        if (found && (found.consultationFee || found.consultation_fee || found.fee)) {
+          baseFee = Number(found.consultationFee || found.consultation_fee || found.fee);
+        }
+      }
+    }
+  }
+
+  if (baseFee <= 0) {
+    baseFee = 500;
+  }
+
+  // 2. Discount
+  const discount = Number(apt.discount_amount ?? apt.discountAmount ?? apt.discount ?? 0);
+
+  // 3. Refund status & amount
+  const paymentStatus = String(apt.payment_status || apt.paymentStatus || (apt.status === 'Paid' ? 'Paid' : 'Paid')).trim();
+  const isFullyRefunded = paymentStatus === 'Refunded';
+  const isPartiallyRefunded = paymentStatus === 'Partially Refunded';
+  const netPayable = Math.max(0, baseFee - discount);
+
+  const refundAmt = Number(
+    apt.refund_amount ?? apt.refundAmount ?? (isFullyRefunded ? netPayable : 0)
+  );
+
+  // 4. Net paid / payment received
+  const isPaid = paymentStatus === 'Paid' || isPartiallyRefunded || (!isFullyRefunded && (apt.status === 'Paid' || paymentStatus === 'Completed'));
+  
+  let paidAmount = 0;
+  if (isFullyRefunded) {
+    paidAmount = 0;
+  } else if (apt.paid_amount !== undefined && apt.paid_amount !== null && !isNaN(Number(apt.paid_amount))) {
+    paidAmount = Number(apt.paid_amount);
+  } else if (isPaid) {
+    paidAmount = Math.max(0, netPayable - refundAmt);
+  }
+
+  return {
+    baseFee,
+    discount,
+    refundAmt,
+    netPayable,
+    paidAmount,
+    isPaid,
+    isFullyRefunded,
+    isPartiallyRefunded
+  };
+}
+
 
 

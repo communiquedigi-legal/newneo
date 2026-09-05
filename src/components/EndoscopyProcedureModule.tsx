@@ -46,6 +46,7 @@ import { Badge } from './ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
 import { storage, STORAGE_KEYS } from '../lib/storage';
+import { cleanHospitalName } from '../lib/utils';
 import { MOCK_ENDO_RATES } from '../mockData';
 import { DirectEndoscopyProcedure, Patient } from '../types';
 import { toast } from 'sonner';
@@ -491,7 +492,7 @@ export function EndoscopyProcedureModule() {
   // Print Official Payment Invoice / Receipt
   const printDirectReceipt = (proc: DirectEndoscopyProcedure) => {
     const rawHospitalInfo = storage.get(STORAGE_KEYS.HOSPITAL_INFO, null);
-    const hospitalName = rawHospitalInfo?.name || 'NEO GASTRO PLUS HOSPITAL';
+    const hospitalName = cleanHospitalName(rawHospitalInfo?.name);
     const hospitalAddress = rawHospitalInfo?.address || 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh';
 
     const iframeId = 'direct-receipt-iframe';
@@ -619,7 +620,7 @@ export function EndoscopyProcedureModule() {
   const printConsentForm = (proc: DirectEndoscopyProcedure, langMode?: 'bilingual' | 'english' | 'hindi') => {
     const activeLang = langMode || consentLanguage;
     const rawHospitalInfo = storage.get(STORAGE_KEYS.HOSPITAL_INFO, null);
-    const hospitalName = rawHospitalInfo?.name || 'NEO GASTRO PLUS HOSPITAL';
+    const hospitalName = cleanHospitalName(rawHospitalInfo?.name);
     const hospitalAddress = rawHospitalInfo?.address || 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh';
 
     const iframeId = 'consent-print-iframe';
@@ -810,7 +811,7 @@ export function EndoscopyProcedureModule() {
   // Print Endoscope Disinfection & Sterilization Log Certificate / Slip
   const printDisinfectionSlip = (log: ScopeDisinfectionLog) => {
     const rawHospitalInfo = storage.get(STORAGE_KEYS.HOSPITAL_INFO, null);
-    const hospitalName = rawHospitalInfo?.name || 'NEO GASTRO PLUS HOSPITAL';
+    const hospitalName = cleanHospitalName(rawHospitalInfo?.name);
     const hospitalAddress = rawHospitalInfo?.address || 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh';
 
     const iframeId = 'disinfection-print-iframe';
@@ -994,96 +995,177 @@ export function EndoscopyProcedureModule() {
   const completedCount = procedures.filter(p => p.status === 'Procedure Completed' || p.status === 'Discharged').length;
 
   const handlePrintDailySheet = () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
-    let html = `
-      <html>
-      <head>
-        <title>Endoscopy Daily Register Sheet</title>
-        <style>
-          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 20px; font-size: 12px; }
-          h2 { text-align: center; margin-bottom: 5px; }
-          p.subtitle { text-align: center; margin-top: 0; color: #555; margin-bottom: 20px; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-          th, td { border: 1px solid #000; padding: 8px; text-align: left; }
-          th { background-color: #f3f4f6; font-weight: bold; }
-          .footer { text-align: right; margin-top: 30px; font-size: 11px; }
-          @media print {
-            @page { margin: 10mm; size: landscape; }
-          }
-        </style>
-      </head>
-      <body>
-        <h2>Direct Endoscopy & Colonoscopy Patient Register</h2>
-        <p class="subtitle">Daily Sheet - Printed on ${format(new Date(), 'dd MMM yyyy, hh:mm a')}</p>
-        <table>
-          <thead>
-            <tr>
-              <th>S.No</th>
-              <th>Date/Time</th>
-              <th>Patient Details</th>
-              <th>Procedure Type</th>
-              <th>Referred By</th>
-              <th>Status</th>
-              <th>Gross Amount</th>
-              <th>Discount</th>
-              <th>Net Paid</th>
-            </tr>
-          </thead>
-          <tbody>
-    `;
+    const rawHospitalInfo = storage.get(STORAGE_KEYS.HOSPITAL_INFO, null);
+    const hospitalName = cleanHospitalName(rawHospitalInfo?.name);
+    const hospitalAddress = rawHospitalInfo?.address || 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh';
 
     let totalAmount = 0;
     let totalDiscount = 0;
     let totalPaid = 0;
 
+    let rowsHtml = '';
     filteredProcedures.forEach((proc, index) => {
-      totalAmount += (proc.procedureFee + proc.sedationFee + proc.biopsyKitFee) || 0;
-      totalDiscount += proc.discountAmount || 0;
-      totalPaid += proc.amountPaid || 0;
+      const gross = ((proc.procedureFee || 0) + (proc.sedationFee || 0) + (proc.biopsyKitFee || 0)) || Number(proc.totalAmount || 0);
+      const disc = Number(proc.discountAmount || 0);
+      const paid = Number(proc.amountPaid ?? proc.totalAmount ?? (gross - disc));
 
-      html += `
+      totalAmount += gross;
+      totalDiscount += disc;
+      totalPaid += paid;
+
+      rowsHtml += `
         <tr>
-          <td>${index + 1}</td>
-          <td>${format(new Date(proc.scheduledDateTime || new Date()), 'dd-MM-yyyy')}<br/>${format(new Date(proc.scheduledDateTime || new Date()), 'hh:mm a')}</td>
-          <td><b>${proc.patientName}</b><br/>${proc.age}y / ${proc.gender}<br/>Ph: ${proc.patientPhone}</td>
-          <td>${proc.procedureType}</td>
+          <td style="text-align: center;">${index + 1}</td>
+          <td>${format(new Date(proc.scheduledDateTime || new Date()), 'dd-MM-yyyy')}<br/><span style="color:#64748b; font-size:10px;">${format(new Date(proc.scheduledDateTime || new Date()), 'hh:mm a')}</span></td>
+          <td><b>${proc.patientName}</b><br/><span style="color:#475569; font-size:10px;">${proc.age}y / ${proc.gender} | Ph: ${proc.patientPhone}</span></td>
+          <td><b>${proc.procedureType}</b><br/><span style="color:#64748b; font-size:10px;">Cat: ${proc.procedureCategory || 'Endoscopy'}</span></td>
           <td>${proc.referredByDoctor || 'Self'}</td>
-          <td>${proc.status || 'Scheduled'}</td>
-          <td>Rs. ${((proc.procedureFee || 0) + (proc.sedationFee || 0) + (proc.biopsyKitFee || 0)).toLocaleString('en-IN')}</td>
-          <td>Rs. ${(proc.discountAmount || 0).toLocaleString('en-IN')}</td>
-          <td>Rs. ${(proc.amountPaid || 0).toLocaleString('en-IN')}</td>
+          <td><span style="font-size:10px; font-weight:600; padding:2px 6px; background:#f1f5f9; border-radius:4px;">${proc.status || 'Scheduled'}</span></td>
+          <td>${proc.paymentMode || 'UPI / QR'}</td>
+          <td style="text-align: right; font-weight:600;">₹${gross.toLocaleString('en-IN')}</td>
+          <td style="text-align: right; color:#b45309; font-weight:600;">${disc > 0 ? `-₹${disc.toLocaleString('en-IN')}` : '₹0'}</td>
+          <td style="text-align: right; color:#047857; font-weight:700;">₹${paid.toLocaleString('en-IN')}</td>
         </tr>
       `;
     });
 
-    html += `
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Endoscopy Daily Register Sheet - ${hospitalName}</title>
+        <meta charset="utf-8" />
+        <style>
+          @page { size: landscape; margin: 8mm; }
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 10px; font-size: 11px; color: #1e293b; }
+          .header { border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: flex-end; }
+          .hospital-title { font-size: 20px; font-weight: 800; color: #0f172a; letter-spacing: -0.02em; margin: 0 0 3px 0; }
+          .hospital-sub { font-size: 11px; color: #64748b; margin: 0; }
+          .sheet-badge { text-align: right; }
+          .sheet-title { font-size: 16px; font-weight: 700; color: #0369a1; margin: 0 0 2px 0; }
+          .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+          .metric-card { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px; background: #f8fafc; }
+          .metric-lbl { font-size: 10px; font-weight: 600; color: #64748b; text-transform: uppercase; }
+          .metric-val { font-size: 16px; font-weight: 800; color: #0f172a; margin-top: 2px; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 11px; }
+          th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; }
+          th { background-color: #f1f5f9; font-weight: 700; color: #334155; }
+          tfoot th { background-color: #e2e8f0; font-size: 12px; font-weight: 800; }
+          .footer { display: flex; justify-content: space-between; margin-top: 20px; font-size: 10px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 10px; }
+          @media print {
+            body { padding: 0; }
+            .no-print { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <h1 class="hospital-title">${hospitalName}</h1>
+            <p class="hospital-sub">${hospitalAddress} | Endoscopy & Colonoscopy Suite</p>
+          </div>
+          <div class="sheet-badge">
+            <div class="sheet-title">Direct Endoscopy Daily Register</div>
+            <div style="font-size: 11px; color: #475569;">Printed on: ${format(new Date(), 'dd MMM yyyy, hh:mm a')}</div>
+          </div>
+        </div>
+
+        <div class="metrics">
+          <div class="metric-card">
+            <div class="metric-lbl">Total Procedures</div>
+            <div class="metric-val" style="color:#0369a1;">${filteredProcedures.length}</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-lbl">Base Price (Gross)</div>
+            <div class="metric-val">₹${totalAmount.toLocaleString('en-IN')}</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-lbl">Total Concession / Discount</div>
+            <div class="metric-val" style="color:#b45309;">₹${totalDiscount.toLocaleString('en-IN')}</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-lbl">Payment Received (Net)</div>
+            <div class="metric-val" style="color:#047857;">₹${totalPaid.toLocaleString('en-IN')}</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 40px; text-align: center;">S.No</th>
+              <th>Date / Time</th>
+              <th>Patient Details</th>
+              <th>Procedure Details</th>
+              <th>Referred By</th>
+              <th>Status</th>
+              <th>Payment Mode</th>
+              <th style="text-align: right;">Base Price</th>
+              <th style="text-align: right;">Discount</th>
+              <th style="text-align: right;">Payment Received</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
           </tbody>
           <tfoot>
             <tr>
-              <th colspan="6" style="text-align: right;">Total Collection:</th>
-              <th>Rs. ${totalAmount.toLocaleString('en-IN')}</th>
-              <th>Rs. ${totalDiscount.toLocaleString('en-IN')}</th>
-              <th>Rs. ${totalPaid.toLocaleString('en-IN')}</th>
+              <th colspan="7" style="text-align: right;">TOTAL REGISTER COLLECTION:</th>
+              <th style="text-align: right;">₹${totalAmount.toLocaleString('en-IN')}</th>
+              <th style="text-align: right; color:#b45309;">₹${totalDiscount.toLocaleString('en-IN')}</th>
+              <th style="text-align: right; color:#047857;">₹${totalPaid.toLocaleString('en-IN')}</th>
             </tr>
           </tfoot>
         </table>
+
         <div class="footer">
-          <p>Endoscopy Suite Manager / Authorised Signatory</p>
+          <div>Verified By: Duty Endoscopy Technologist / Sister In-Charge</div>
+          <div>Authorized Signatory / Medical Director</div>
         </div>
-        <script>
-          window.onload = () => {
-            window.print();
-            setTimeout(() => window.close(), 500);
-          }
-        </script>
       </body>
       </html>
     `;
 
-    printWindow.document.write(html);
-    printWindow.document.close();
+    const iframeId = 'endoscopy-daily-register-print-frame';
+    let iframe = document.getElementById(iframeId) as HTMLIFrameElement;
+    if (iframe) document.body.removeChild(iframe);
+
+    iframe = document.createElement('iframe');
+    iframe.id = iframeId;
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (doc) {
+      doc.open();
+      doc.write(html);
+      doc.close();
+
+      setTimeout(() => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (e) {
+          const printWin = window.open('', '_blank');
+          if (printWin) {
+            printWin.document.write(html);
+            printWin.document.close();
+            printWin.print();
+          }
+        }
+      }, 350);
+    } else {
+      const printWin = window.open('', '_blank');
+      if (printWin) {
+        printWin.document.write(html);
+        printWin.document.close();
+        printWin.print();
+      }
+    }
   };
 
   const handleExportEndoscopy = () => {

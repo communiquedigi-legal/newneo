@@ -3766,9 +3766,16 @@ const rawSupabaseService = {
         const isOldEmail = !data.email || data.email.includes('cureline') || data.email.includes('medicare');
         const isOldName = !data.name || data.name.includes('CureLine') || data.name.includes('Medicare') || (data.name.toLowerCase().includes('gastro plus') && !data.name.toUpperCase().includes('NEO GASTRO PLUS'));
 
+        let cleanName = isOldName ? 'NEO GASTRO PLUS HOSPITAL' : (data.name || 'NEO GASTRO PLUS HOSPITAL');
+        cleanName = cleanName.replace(/\b(NEO\s*)+/gi, 'NEO ').replace(/\bNEW\b/gi, 'NEO');
+        if (!/\bNEO\b/i.test(cleanName) && /gastro\s*plus/i.test(cleanName)) {
+          cleanName = cleanName.replace(/gastro\s*plus/gi, 'NEO GASTRO PLUS');
+        }
+        cleanName = cleanName.replace(/\b(NEO\s*)+/gi, 'NEO ').trim();
+
         const formatted = {
           ...data,
-          name: isOldName ? 'NEO GASTRO PLUS HOSPITAL' : (data.name ? data.name.replace(/gastro\s*plus/gi, 'NEO GASTRO PLUS') : 'NEO GASTRO PLUS HOSPITAL'),
+          name: cleanName,
           address: isOldAddress ? 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh' : data.address,
           phone: isOldPhone ? '9109102145/9109101246' : data.phone,
           email: isOldEmail ? 'gatroplusbhopal@gmail.com' : data.email,

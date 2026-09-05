@@ -51,7 +51,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { formatCurrency, formatDate, buildDateWiseInvoiceMap, buildSequentialInvoiceMap, buildDepartmentWiseInvoiceMap, getCleanDateString, getBillDepartmentAndType, generateDateWiseInvoiceNumber } from '@/lib/utils';
+import { formatCurrency, formatDate, buildDateWiseInvoiceMap, buildSequentialInvoiceMap, buildDepartmentWiseInvoiceMap, getCleanDateString, getBillDepartmentAndType, generateDateWiseInvoiceNumber, getAppointmentFinancials, cleanHospitalName } from '@/lib/utils';
 
 import { numberToWords } from '@/lib/pharmacyInvoicePrint';
 import { sortInvoicesByLatestSerial, calculateHospitalGst } from '@/lib/taxUtils';
@@ -104,13 +104,22 @@ export default function Billing() {
   const [expenses, setExpenses] = useState<any[]>(() => storage.get(STORAGE_KEYS.EXPENSES, []) || []);
   const [loading, setLoading] = useState(false);
   const [templateImage, setTemplateImage] = useState<string | null>(() => storage.get(STORAGE_KEYS.TEMPLATE_IMAGE, null));
-  const [hospitalInfo, setHospitalInfo] = useState(() => storage.get(STORAGE_KEYS.HOSPITAL_INFO, {
-    name: 'NEO GASTRO PLUS HOSPITAL',
-    address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
-    phone: '9109102145/9109101246',
-    email: 'gatroplusbhopal@gmail.com',
-    logo: null as string | null
-  }));
+  const [hospitalInfo, setHospitalInfo] = useState(() => {
+    const saved = storage.get<any>(STORAGE_KEYS.HOSPITAL_INFO, null);
+    const def = {
+      name: 'NEO GASTRO PLUS HOSPITAL',
+      address: 'Plot No. 7 & 8, Om Shiv Nagar, Gufa Mandir Road, Lal Ghati Bhopal, 462030, Madhya Pradesh',
+      phone: '9109102145/9109101246',
+      email: 'gatroplusbhopal@gmail.com',
+      logo: null as string | null
+    };
+    if (!saved) return def;
+    return {
+      ...def,
+      ...saved,
+      name: cleanHospitalName(saved.name)
+    };
+  });
 
   const fetchData = async () => {
     const [invoicesData, patientsData, staffData, expensesData, appointmentsData] = await Promise.all([
@@ -188,7 +197,7 @@ export default function Billing() {
           const pId = apt.patient_id || apt.patientId;
           const aptDateStr = apt.appointment_date || (apt.created_at ? new Date(apt.created_at).toISOString().split('T')[0] : '');
 
-          const hasInvoice = enrichedInvoices.some((inv: any) => {
+          const existingInv = enrichedInvoices.find((inv: any) => {
             const invPid = inv.patient_id || inv.patientId;
             const invDateStr = inv.created_at ? new Date(inv.created_at).toISOString().split('T')[0] : '';
             const invNum = String(inv.invoice_number || inv.invoiceNumber || '');
@@ -203,25 +212,36 @@ export default function Billing() {
             return isMatchingAppointment || (isMatchingPatient && (invDateStr === aptDateStr || inv.type === 'OPD'));
           });
 
-          if (!hasInvoice) {
-            const baseFee = Number(apt.fee || apt.appointmentFee || (storage.get(STORAGE_KEYS.OPD_CHARGES, { consult: 500 }).consult || 500));
-            const discount = Number(apt.discount_amount || apt.discountAmount || 0);
-            const feeToCollect = Math.max(0, baseFee - discount);
+          const fin = getAppointmentFinancials(apt, staffData);
+
+          if (existingInv) {
+            // Reconcile existing invoice amounts with standardized appointment financials
+            existingInv.total_amount = fin.baseFee;
+            existingInv.discount_amount = fin.discount;
+            existingInv.payable_amount = fin.netPayable;
+            existingInv.paid_amount = fin.paidAmount;
+            existingInv.status = fin.isPaid ? 'Paid' : 'Pending';
+            existingInv.payment_status = fin.isPaid ? 'Paid' : 'Pending';
+            existingInv.type = 'OPD';
+            if (apt.payment_method || apt.paymentMethod || apt.paymentMode) {
+              existingInv.payment_method = apt.payment_method || apt.paymentMethod || apt.paymentMode;
+            }
+          } else {
             const matchedPatient = patientsData ? patientsData.find((p: any) => isIdMatch(p.id, pId) || (p.mrn && p.mrn === apt.patientMrn)) : null;
 
             const virtualInv = {
               id: `virtual-inv-opd-${apt.id}`,
               patient_id: pId,
               invoice_number: `INV-OPD-V-${apt.id}`,
-              status: 'Paid',
-              payment_status: 'Paid',
-              total_amount: baseFee,
-              discount_amount: discount,
-              payable_amount: feeToCollect,
-              paid_amount: feeToCollect,
+              status: fin.isPaid ? 'Paid' : 'Pending',
+              payment_status: fin.isPaid ? 'Paid' : 'Pending',
+              total_amount: fin.baseFee,
+              discount_amount: fin.discount,
+              payable_amount: fin.netPayable,
+              paid_amount: fin.paidAmount,
               payment_method: apt.payment_method || apt.paymentMethod || apt.paymentMode || 'Cash',
               type: 'OPD',
-              created_at: apt.created_at || new Date().toISOString(),
+              created_at: apt.created_at || (aptDateStr ? `${aptDateStr}T10:00:00Z` : new Date().toISOString()),
               patients: matchedPatient ? {
                 id: matchedPatient.id,
                 name: matchedPatient.name,
@@ -246,35 +266,57 @@ export default function Billing() {
         directEndoProceduresList.forEach((proc: any) => {
           if (!proc) return;
           const procInvId = proc.invoiceId || `INV-ENDO-${proc.id}`;
-          const hasInv = enrichedInvoices.some((inv: any) => {
+
+          const procFee = Number(proc.procedureFee ?? proc.baseFee ?? 0);
+          const sedFee = Number(proc.sedationFee ?? 0);
+          const kitFee = Number(proc.biopsyKitFee ?? proc.kitFee ?? 0);
+          const discAmt = Number(proc.discountAmount ?? proc.discount ?? 0);
+          
+          const grossFee = (procFee + sedFee + kitFee > 0) 
+            ? (procFee + sedFee + kitFee) 
+            : (Number(proc.totalAmount ?? 4500) + discAmt);
+            
+          const netAmt = Number(proc.totalAmount ?? proc.netTotalAmount ?? Math.max(0, grossFee - discAmt));
+          const paidAmt = Number(proc.amountPaid ?? netAmt);
+          const procDateStr = proc.scheduledDateTime || proc.bookingDate || proc.createdAt || new Date().toISOString();
+
+          const existingInv = enrichedInvoices.find((inv: any) => {
             const invId = String(inv.id || '');
             const invNum = String(inv.invoice_number || inv.invoiceNumber || '');
-            return invId === procInvId || invNum === procInvId || (invNum && invNum.includes(proc.id));
+            const invPid = String(inv.patient_id || inv.patientId || '');
+            const procPid = String(proc.patientId || proc.id || '');
+            return invId === procInvId || invNum === procInvId || (invNum && invNum.includes(proc.id)) || (invPid && invPid === procPid && (inv.type === 'Endoscopy' || inv.type === 'ENDO'));
           });
 
-          if (!hasInv) {
-            const netAmt = Number(proc.netTotalAmount || proc.packageFee || 4500);
-            const discAmt = Number(proc.discountAmount || 0);
-            const baseFee = Number(proc.packageFee || netAmt);
-            const sedFee = Number(proc.sedationFee || 0);
-            const kitFee = Number(proc.kitFee || 0);
-            const totalAmt = baseFee + sedFee + kitFee > 0 ? (baseFee + sedFee + kitFee) : (netAmt + discAmt);
-
+          if (existingInv) {
+            // Reconcile and update existing invoice so figures match Endoscopy register exactly
+            existingInv.total_amount = grossFee;
+            existingInv.discount_amount = discAmt;
+            existingInv.payable_amount = netAmt;
+            existingInv.paid_amount = paidAmt;
+            existingInv.status = 'Paid';
+            existingInv.payment_status = 'Paid';
+            existingInv.payment_method = proc.paymentMode || existingInv.payment_method || 'UPI / QR';
+            existingInv.type = 'Endoscopy';
+            if (proc.scheduledDateTime) {
+              existingInv.created_at = proc.scheduledDateTime;
+            }
+          } else {
             const endoInv = {
               id: procInvId,
               invoice_number: procInvId,
               patient_id: proc.patientId || proc.id,
               status: 'Paid',
               payment_status: 'Paid',
-              total_amount: totalAmt,
+              total_amount: grossFee,
               discount_amount: discAmt,
               payable_amount: netAmt,
-              paid_amount: netAmt,
-              payment_method: proc.paymentMode || 'Cash',
+              paid_amount: paidAmt,
+              payment_method: proc.paymentMode || 'UPI / QR',
               type: 'Endoscopy',
-              created_at: proc.bookingDate || proc.createdAt || new Date().toISOString(),
+              created_at: procDateStr,
               items: [
-                { description: `Direct ${proc.procedureType || 'Endoscopy Procedure'}`, amount: baseFee, category: 'Endoscopy' },
+                { description: `Direct ${proc.procedureType || 'Endoscopy Procedure'}`, amount: procFee > 0 ? procFee : grossFee, category: 'Endoscopy' },
                 ...(sedFee > 0 ? [{ description: `Sedation & Anesthesia (${proc.sedationType || 'Standard'})`, amount: sedFee, category: 'Endoscopy' }] : []),
                 ...(kitFee > 0 ? [{ description: `Disposable Biopsy Kit & Consumables`, amount: kitFee, category: 'Endoscopy' }] : [])
               ],
@@ -3077,7 +3119,7 @@ export default function Billing() {
 
     allDayBills.forEach((b: any) => {
       const g = Number(b.total_amount ?? b.totalAmount ?? b.total ?? 0);
-      const d = Number(b.discount ?? b.discount_amount ?? 0);
+      const d = Number(b.discount_amount ?? b.discountAmount ?? b.discount ?? 0);
       const payable = Number(b.payable_amount ?? b.payableAmount ?? Math.max(0, g - d));
       const p = Number(b.paid_amount ?? b.paidAmount ?? (b.status === 'Paid' ? payable : 0));
       const du = Number(b.due ?? b.due_amount ?? Math.max(0, payable - p));
@@ -3273,7 +3315,7 @@ export default function Billing() {
 
     dayBills.forEach((b: any) => {
       const gross = Number(b.total_amount ?? b.totalAmount ?? b.total ?? 0);
-      const disc = Number(b.discount ?? b.discount_amount ?? 0);
+      const disc = Number(b.discount_amount ?? b.discountAmount ?? b.discount ?? 0);
       const payable = Number(b.payable_amount ?? b.payableAmount ?? Math.max(0, gross - disc));
       const paid = Number(b.paid_amount ?? b.paidAmount ?? (b.status === 'Paid' ? payable : 0));
       const due = Number(b.due ?? b.due_amount ?? Math.max(0, payable - paid));
