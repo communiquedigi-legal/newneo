@@ -63,7 +63,7 @@ export function ReportProblemModal({
     const isAndroid = /Android/i.test(navigator.userAgent);
     return {
       appName: 'NEO GASTRO PLUS Hospital Management System',
-      version: 'v2.4.0 (Mobile APK Universal)',
+      version: 'v2.5.0 (Synchronized Mobile & Web Client)',
       deviceType: isAndroid ? 'Android Phone / Tablet' : isMobile ? 'Mobile Device' : 'Desktop / Workstation',
       screenResolution: `${window.innerWidth}x${window.innerHeight} (DPR: ${window.devicePixelRatio || 1})`,
       userAgent: navigator.userAgent,

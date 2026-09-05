@@ -94,12 +94,13 @@ import { RxPrintPreviewModal } from './components/RxPrintPreviewModal';
 import { WhatsAppPrescriptionModal } from './components/WhatsAppPrescriptionModal';
 import { ApkDownloadModal } from './components/ApkDownloadModal';
 import { ReportProblemModal } from './components/ReportProblemModal';
-import { Smartphone, LifeBuoy } from 'lucide-react';
+import { Smartphone, LifeBuoy, RefreshCw } from 'lucide-react';
 
 import { storage, STORAGE_KEYS } from '@/lib/storage';
 import { MOCK_PATIENTS, MOCK_USERS } from './mockData';
 import { User as UserType } from './types';
 import { supabaseService, syncOfflineDataWithSupabase, getDeletedStaffSet } from '@/services/supabaseService';
+import { syncMobileAppWithServer } from '@/utils/apkDownloader';
 import { hasMenuAccess, normalizeRole, isUserAdmin } from '@/utils/rbac';
 
 export interface NavItem {
@@ -1249,6 +1250,16 @@ export default function App() {
         console.warn('Could not fetch hospital info from database:', err);
       }
 
+      // Fetch fresh staff roster so doctor lists reflect server immediately
+      try {
+        const freshStaff = await supabaseService.getStaff();
+        if (Array.isArray(freshStaff) && freshStaff.length > 0) {
+          storage.set(STORAGE_KEYS.USERS, freshStaff);
+        }
+      } catch (staffErr) {
+        console.warn('Could not refresh staff roster on initialization:', staffErr);
+      }
+
       // Check offline records and sync them automatically!
       try {
         const patients = storage.get(STORAGE_KEYS.PATIENTS, []);
@@ -1288,9 +1299,49 @@ export default function App() {
       }
     };
 
+    // Auto-sync whenever device comes online or tab/app is resumed on mobile
+    const handleDeviceResumeOrOnline = async () => {
+      try {
+        const syncResult = await syncOfflineDataWithSupabase();
+        if (syncResult && syncResult.success && syncResult.syncCount > 0) {
+          toast.success(`Synchronized ${syncResult.syncCount} offline records to cloud!`);
+        }
+        const freshStaff = await supabaseService.getStaff();
+        if (Array.isArray(freshStaff) && freshStaff.length > 0) {
+          storage.set(STORAGE_KEYS.USERS, freshStaff);
+        }
+        window.dispatchEvent(new CustomEvent('supabase-data-sync', { detail: { action: 'device-resume' } }));
+      } catch (err) {
+        console.warn('Mobile auto-sync on resume notice:', err);
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        handleDeviceResumeOrOnline();
+      }
+    };
+
+    const handlePwaUpdate = () => {
+      toast.info('🚀 Mobile app update ready! Refreshing with latest changes...');
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    };
+
+    window.addEventListener('online', handleDeviceResumeOrOnline);
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pwa-update-available', handlePwaUpdate);
+
     if (isAuthenticated) {
       initializeDatabase();
     }
+
+    return () => {
+      window.removeEventListener('online', handleDeviceResumeOrOnline);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pwa-update-available', handlePwaUpdate);
+    };
   }, [isAuthenticated]);
 
   const handleLogout = () => {
@@ -1366,6 +1417,24 @@ function RoleQuickSwitcher({ currentUser, setUser }: { currentUser: any, setUser
 function AppLayout({ user, hospitalInfo, handleLogout, isMobileMenuOpen, setIsMobileMenuOpen, setUser, setHospitalInfo }: any) {
   const [isApkModalOpen, setIsApkModalOpen] = useState(false);
   const [isReportProblemOpen, setIsReportProblemOpen] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleHeaderSync = async () => {
+    setIsSyncing(true);
+    toast.info('Synchronizing mobile app cache, doctor roster, and cloud records...');
+    try {
+      const res = await syncMobileAppWithServer();
+      if (res.success) {
+        toast.success(`Synchronized with live cloud server! (${res.timestamp})`);
+      } else {
+        toast.info('App cache refreshed with current data.');
+      }
+    } catch (err) {
+      toast.error('Sync failed.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   return (
     <div className="flex h-[100dvh] bg-soft-white overflow-hidden">
@@ -1408,6 +1477,20 @@ function AppLayout({ user, hospitalInfo, handleLogout, isMobileMenuOpen, setIsMo
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 lg:gap-4">
+            {/* Cloud & Mobile Sync Button in Header */}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleHeaderSync}
+              disabled={isSyncing}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-400 font-extrabold text-xs h-8 px-2 sm:px-3 rounded-full shadow-sm gap-1 sm:gap-1.5"
+              title="Synchronize mobile app and cloud data"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-white ${isSyncing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">Sync</span>
+            </Button>
+
             {/* APK Download Button in Header */}
             <Button
               type="button"
@@ -1415,7 +1498,7 @@ function AppLayout({ user, hospitalInfo, handleLogout, isMobileMenuOpen, setIsMo
               size="sm"
               onClick={() => setIsApkModalOpen(true)}
               className="bg-amber-400 hover:bg-amber-500 text-slate-950 border-amber-300 font-extrabold text-xs h-8 px-2 sm:px-3 rounded-full shadow-sm gap-1 sm:gap-1.5"
-              title="Download Android APK"
+              title="Download Android APK & Mobile Sync"
             >
               <Smartphone className="w-3.5 h-3.5 text-slate-950" />
               <span className="hidden sm:inline">Download</span> APK

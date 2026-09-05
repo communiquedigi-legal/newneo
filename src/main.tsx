@@ -6,11 +6,41 @@ import './index.css';
 
 // Android Web & Mobile runtime safety guards and Service Worker registration
 if (typeof window !== 'undefined') {
-  if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
+  if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch((err) => {
-        console.warn('Service worker registration failed:', err);
-      });
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then((registration) => {
+          // Immediately check for service worker updates to sync mobile client
+          registration.update().catch(() => {});
+
+          registration.addEventListener('updatefound', () => {
+            const installingWorker = registration.installing;
+            if (installingWorker) {
+              installingWorker.addEventListener('statechange', () => {
+                if (installingWorker.state === 'installed') {
+                  if (navigator.serviceWorker.controller) {
+                    // New update available, post message to skip waiting
+                    installingWorker.postMessage({ type: 'SKIP_WAITING' });
+                    window.dispatchEvent(new CustomEvent('pwa-update-available'));
+                  }
+                }
+              });
+            }
+          });
+        })
+        .catch((err) => {
+          console.warn('Service worker registration failed:', err);
+        });
+    });
+
+    // Auto-reload once when a new service worker takes control
+    let isRefreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!isRefreshing) {
+        isRefreshing = true;
+        window.location.reload();
+      }
     });
   }
 

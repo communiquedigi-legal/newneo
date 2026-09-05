@@ -219,10 +219,10 @@ export default function Login({ onLogin }: LoginProps) {
               </div>
               <div className="text-left">
                 <p className="text-xs font-extrabold text-white group-hover:text-amber-300 transition-colors">
-                  Mobile App Available (APK)
+                  Mobile App Available (v2.5 Sync Enabled)
                 </p>
                 <p className="text-[11px] text-slate-300">
-                  Download Android APK for tablets & mobile phones
+                  Android APK with instant real-time synchronization
                 </p>
               </div>
             </div>

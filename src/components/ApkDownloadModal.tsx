@@ -12,12 +12,14 @@ import {
   ExternalLink,
   ChevronRight,
   ArrowDownToLine,
+  RefreshCw,
+  Clock,
   X
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { downloadHospitalApk, installMobileApp, isAndroidDevice, isMobileDevice } from '@/utils/apkDownloader';
+import { downloadHospitalApk, installMobileApp, syncMobileAppWithServer, isAndroidDevice, isMobileDevice } from '@/utils/apkDownloader';
 
 interface ApkDownloadModalProps {
   isOpen: boolean;
@@ -27,7 +29,9 @@ interface ApkDownloadModalProps {
 
 export function ApkDownloadModal({ isOpen, onClose, hospitalName = 'NEO GASTRO PLUS HOSPITAL' }: ApkDownloadModalProps) {
   const [downloading, setDownloading] = useState(false);
-  const [activeGuideTab, setActiveGuideTab] = useState<'apk' | 'pwa'>('apk');
+  const [syncing, setSyncing] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const [activeGuideTab, setActiveGuideTab] = useState<'apk' | 'pwa' | 'sync'>('apk');
 
   const handleDownloadApk = async () => {
     setDownloading(true);
@@ -66,9 +70,27 @@ export function ApkDownloadModal({ isOpen, onClose, hospitalName = 'NEO GASTRO P
     }
   };
 
+  const handleSyncMobileApp = async () => {
+    setSyncing(true);
+    toast.info('Synchronizing mobile app cache, doctor lists, and cloud database...');
+    try {
+      const res = await syncMobileAppWithServer();
+      setLastSyncTime(res.timestamp);
+      if (res.success) {
+        toast.success(`Mobile App synchronized successfully! (${res.timestamp})`);
+      } else {
+        toast.error('Sync encountered a warning. Offline data preserved safely.');
+      }
+    } catch (err) {
+      toast.error('Could not complete synchronization.');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[560px] p-0 overflow-hidden rounded-3xl border border-slate-200 shadow-2xl bg-white">
+      <DialogContent className="sm:max-w-[580px] p-0 overflow-hidden rounded-3xl border border-slate-200 shadow-2xl bg-white">
         {/* Header with gradient banner */}
         <div className="bg-gradient-to-br from-[#1A5E63] via-[#14494D] to-[#0D3235] text-white p-6 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-48 h-48 bg-white/5 rounded-full blur-2xl -mr-16 -mt-16 pointer-events-none" />
@@ -84,10 +106,10 @@ export function ApkDownloadModal({ isOpen, onClose, hospitalName = 'NEO GASTRO P
                   <Sparkles className="w-3 h-3" /> Android APK & Mobile App
                 </span>
                 <h2 className="text-xl font-extrabold tracking-tight text-white">
-                  Download Mobile APK
+                  Mobile App & APK Sync
                 </h2>
                 <p className="text-xs text-teal-100/90 font-medium mt-0.5">
-                  {hospitalName} Mobile Client (v2.4)
+                  {hospitalName} Mobile Client (v2.5 Synchronized)
                 </p>
               </div>
             </div>
@@ -100,7 +122,40 @@ export function ApkDownloadModal({ isOpen, onClose, hospitalName = 'NEO GASTRO P
           </div>
         </div>
 
-        <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
+        <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+          {/* Synchronize Mobile App Banner */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-teal-500/10 via-emerald-500/10 to-blue-500/10 border border-teal-200/80 flex items-center justify-between gap-3 shadow-xs">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="flex h-2.5 w-2.5 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+                <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
+                  Mobile Sync Engine v2.5
+                </h4>
+              </div>
+              <p className="text-[11px] text-slate-600 font-medium leading-relaxed">
+                Applies all recent web changes (filtered doctors, appointment lists, IPD) to your mobile client.
+              </p>
+              {lastSyncTime && (
+                <p className="text-[10px] text-emerald-700 font-bold flex items-center gap-1">
+                  <Clock className="w-3 h-3" /> Last synchronized at {lastSyncTime}
+                </p>
+              )}
+            </div>
+
+            <Button
+              onClick={handleSyncMobileApp}
+              disabled={syncing}
+              size="sm"
+              className="bg-[#1A5E63] hover:bg-[#13494d] text-white font-bold text-xs h-9 px-3.5 rounded-xl shadow-sm shrink-0 gap-1.5"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? 'Syncing...' : 'Sync Mobile Now'}
+            </Button>
+          </div>
+
           {/* Main Action Buttons Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Primary APK Download Card */}
@@ -110,11 +165,11 @@ export function ApkDownloadModal({ isOpen, onClose, hospitalName = 'NEO GASTRO P
                   <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-[#1A5E63] text-white">
                     Direct Package
                   </span>
-                  <span className="text-[11px] font-bold text-slate-500">v2.4.0 • 18 MB</span>
+                  <span className="text-[11px] font-bold text-slate-500">v2.5.0 • Sync Enabled</span>
                 </div>
                 <h4 className="text-sm font-extrabold text-slate-900 pt-1">Download APK File</h4>
                 <p className="text-[11px] text-slate-600 leading-relaxed">
-                  Install standalone Android APK file with all hospital modules and offline capabilities.
+                  Install standalone Android APK file with all hospital modules and automatic synchronization.
                 </p>
               </div>
 
@@ -148,7 +203,7 @@ export function ApkDownloadModal({ isOpen, onClose, hospitalName = 'NEO GASTRO P
                 </div>
                 <h4 className="text-sm font-extrabold text-slate-900 pt-1">Install to Home Screen</h4>
                 <p className="text-[11px] text-slate-600 leading-relaxed">
-                  Add full-screen app icon to your phone with instant launch and auto-updates.
+                  Add full-screen app icon to your phone with instant launch and automatic continuous updates.
                 </p>
               </div>
 
@@ -166,12 +221,12 @@ export function ApkDownloadModal({ isOpen, onClose, hospitalName = 'NEO GASTRO P
           {/* Included Features Pill Banner */}
           <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3.5 space-y-2">
             <p className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-emerald-600" /> Included Mobile Packages & Features
+              <ShieldCheck className="w-4 h-4 text-emerald-600" /> Included Synchronized Features
             </p>
             <div className="grid grid-cols-2 gap-2 text-xs text-slate-700 font-semibold">
               <div className="flex items-center gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-teal-600 shrink-0" />
-                <span>Full OPD & IPD Management</span>
+                <span>Verified Doctor Roster Only</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-teal-600 shrink-0" />
@@ -188,11 +243,11 @@ export function ApkDownloadModal({ isOpen, onClose, hospitalName = 'NEO GASTRO P
             </div>
           </div>
 
-          {/* How to Install Steps */}
+          {/* How to Install Steps with Sync Info */}
           <div className="space-y-3">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                <Info className="w-4 h-4 text-medical-blue" /> Easy Installation Steps
+                <Info className="w-4 h-4 text-medical-blue" /> Guide & Auto-Sync
               </h4>
               <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg text-[10px] font-bold">
                 <button
@@ -201,7 +256,7 @@ export function ApkDownloadModal({ isOpen, onClose, hospitalName = 'NEO GASTRO P
                     activeGuideTab === 'apk' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
                   }`}
                 >
-                  APK Installation
+                  APK Install
                 </button>
                 <button
                   onClick={() => setActiveGuideTab('pwa')}
@@ -209,12 +264,20 @@ export function ApkDownloadModal({ isOpen, onClose, hospitalName = 'NEO GASTRO P
                     activeGuideTab === 'pwa' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
                   }`}
                 >
-                  Chrome / Browser
+                  Chrome / PWA
+                </button>
+                <button
+                  onClick={() => setActiveGuideTab('sync')}
+                  className={`px-2.5 py-1 rounded-md transition-all ${
+                    activeGuideTab === 'sync' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Sync Details
                 </button>
               </div>
             </div>
 
-            {activeGuideTab === 'apk' ? (
+            {activeGuideTab === 'apk' && (
               <ol className="space-y-2 text-xs text-slate-700 font-medium">
                 <li className="flex items-start gap-2.5">
                   <span className="w-5 h-5 rounded-full bg-teal-100 text-[#1A5E63] font-bold text-[11px] flex items-center justify-center shrink-0 mt-0.5">
@@ -245,11 +308,13 @@ export function ApkDownloadModal({ isOpen, onClose, hospitalName = 'NEO GASTRO P
                     4
                   </span>
                   <span>
-                    Open <strong className="text-slate-900">NEO GASTRO PLUS HMS</strong> from your app drawer and login with your Staff ID & Password!
+                    Open <strong className="text-slate-900">NEO GASTRO PLUS HMS</strong> from your app drawer. It automatically syncs all latest updates!
                   </span>
                 </li>
               </ol>
-            ) : (
+            )}
+
+            {activeGuideTab === 'pwa' && (
               <ol className="space-y-2 text-xs text-slate-700 font-medium">
                 <li className="flex items-start gap-2.5">
                   <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-800 font-bold text-[11px] flex items-center justify-center shrink-0 mt-0.5">
@@ -277,12 +342,33 @@ export function ApkDownloadModal({ isOpen, onClose, hospitalName = 'NEO GASTRO P
                 </li>
               </ol>
             )}
+
+            {activeGuideTab === 'sync' && (
+              <div className="space-y-2.5 text-xs text-slate-700">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                  <p className="font-bold text-slate-900 flex items-center gap-1.5">
+                    <Wifi className="w-3.5 h-3.5 text-teal-600" /> Automatic Background Sync
+                  </p>
+                  <p className="text-[11px] text-slate-600">
+                    Whenever your phone or tablet connects to the internet, the app automatically checks for newer code versions, updates doctor lists, and refreshes the cache without requiring a manual re-installation.
+                  </p>
+                </div>
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                  <p className="font-bold text-slate-900 flex items-center gap-1.5">
+                    <RefreshCw className="w-3.5 h-3.5 text-emerald-600" /> Instant Manual Force-Sync
+                  </p>
+                  <p className="text-[11px] text-slate-600">
+                    Tap the <strong>"Sync Mobile Now"</strong> button above at any time to purge outdated temporary local files and pull the latest doctors, appointments, and bills from the cloud.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
         <DialogFooter className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between sm:justify-between">
           <p className="text-[11px] text-slate-500 font-medium">
-            Compatible with Android 7.0 to Android 14+
+            Compatible with Android 7.0 to Android 15+
           </p>
           <Button variant="outline" size="sm" onClick={onClose} className="rounded-xl font-bold text-xs">
             Close
