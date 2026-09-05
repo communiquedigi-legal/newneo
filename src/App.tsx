@@ -689,16 +689,74 @@ function QuickRegisterForm({ currentUser }: { currentUser: UserType | null }) {
       return deletedSet.has(uId) || (uEmail && deletedSet.has(uEmail)) || (uName && deletedSet.has(uName)) || (uNameNorm && deletedSet.has(uNameNorm));
     };
 
+    const formatDoctorDisplayName = (rawName: string) => {
+      if (!rawName) return '';
+      const clean = rawName.trim().replace(/^(dr|doctor)\.?\s+/i, '').trim();
+      return `Dr. ${clean}`;
+    };
+
     try {
       const storedUsers = storage.get(STORAGE_KEYS.USERS, []);
-      const docUsers = (storedUsers || []).filter((u: any) => 
-        !isDeletedUser(u) && (
-          u.role?.toUpperCase() === 'DOCTOR' || 
-          u.role?.toUpperCase() === 'SURGEON' || 
-          (u.name && u.name.toLowerCase().includes('dr.')) ||
-          !!u.specialization
-        )
-      );
+      const docUsers = (storedUsers || []).filter((u: any) => {
+        if (!u || !u.name || isDeletedUser(u)) return false;
+        const r = (u.role || '').toUpperCase().trim();
+        const n = (u.name || '').toLowerCase().trim();
+        const dept = (u.department || '').toLowerCase().trim();
+
+        // Admin exclusions
+        if (r === 'ADMIN' || r === 'SUPER_ADMIN' || r === 'ADMINISTRATOR' || r === 'MANAGER' || r.includes('ADMIN')) {
+          return false;
+        }
+        if (n.includes('(admin)') || n.includes(' admin') || n.startsWith('admin') || n.includes('administrator') || dept === 'administration' || dept === 'management') {
+          return false;
+        }
+
+        // Non-doctor roles
+        const nonDoctorRoleKeywords = [
+          'RECEPTIONIST', 'RECEPTION', 'FRONT_DESK', 'FRONT_OFFICE', 'CASHIER', 
+          'BILLING', 'ACCOUNTANT', 'ACCOUNTS', 'LAB', 'LAB_TECH', 'LAB_STAFF', 
+          'TECHNICIAN', 'PHARMACIST', 'PHARMACY', 'NURSE', 'NURSING', 'STAFF_NURSE', 
+          'HR', 'SECURITY', 'CLEANER', 'HOUSEKEEPING', 'DRIVER', 'ATTENDANT', 'PEON', 'CLERK', 'STAFF'
+        ];
+        if (nonDoctorRoleKeywords.some(kw => r === kw || r.includes(kw))) {
+          return false;
+        }
+
+        // Non-doctor departments
+        const nonDoctorDeptKeywords = [
+          'reception', 'front desk', 'front office', 'billing', 'accounts', 
+          'pharmacy', 'laboratory', 'pathology', 'lab', 'nursing', 'housekeeping', 
+          'administration', 'management', 'security', 'maintenance', 'hr'
+        ];
+        if (nonDoctorDeptKeywords.some(kd => dept === kd || dept.includes(kd))) {
+          return false;
+        }
+
+        // Non-doctor name keywords
+        const nonDoctorNameKeywords = [
+          'receptionist', 'reception', 'front desk', 'lab tech', 'lab technician', 
+          'technician', 'pharmacist', 'pharmacy', 'nurse', 'sister', 'accountant', 'cashier', 
+          '(admin)', 'admin', 'operator', 'attendant', 'helper'
+        ];
+        if (nonDoctorNameKeywords.some(kn => n.includes(kn))) {
+          return false;
+        }
+
+        // Doctor role or explicit title
+        const doctorRoles = ['DOCTOR', 'SURGEON', 'PHYSICIAN', 'CONSULTANT', 'MEDICAL_OFFICER'];
+        if (doctorRoles.includes(r) || r.includes('DOCTOR') || r.includes('SURGEON') || r.includes('PHYSICIAN')) {
+          return true;
+        }
+        if (/^(dr|doctor)\.?\s+/i.test(u.name.trim())) {
+          return true;
+        }
+
+        return false;
+      }).map((u: any) => ({
+        ...u,
+        name: formatDoctorDisplayName(u.name)
+      }));
+
       if (docUsers.length > 0) return docUsers;
     } catch {}
 

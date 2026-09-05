@@ -652,12 +652,13 @@ export default function OPD() {
       });
     } else {
       // Auto pre-populate doctor, date, and time if empty
-      const defaultDoctor = newAppointment.doctor || allDoctors[0]?.name || 'Dr. Rajesh Sharma';
+      const validPrevDoctor = allDoctors.find(d => d.name === newAppointment.doctor)?.name;
+      const defaultDoctor = validPrevDoctor || allDoctors[0]?.name || '';
       const defaultDate = newAppointment.date || getLocalDateString();
       const defaultTime = newAppointment.time || '10:00 AM';
       setNewAppointment(prev => ({
         ...prev,
-        doctor: prev.doctor || defaultDoctor,
+        doctor: defaultDoctor,
         date: prev.date || defaultDate,
         time: prev.time || defaultTime
       }));
@@ -759,12 +760,18 @@ export default function OPD() {
     return [];
   });
 
-  // Resolved list of all available doctors (strictly synchronized with Admin Settings Staff / Doctors list)
+  // Resolved list of all available doctors (strictly actual doctors only; receptionists, admins, lab techs, etc. excluded)
   const allDoctors = useMemo(() => {
     const map = new Map<string, any>();
 
     const getDocKey = (name: string) => {
       return (name || '').toLowerCase().replace(/^(dr|doctor)\.?\s+/i, '').trim();
+    };
+
+    const formatDoctorDisplayName = (rawName: string) => {
+      if (!rawName) return '';
+      const clean = rawName.trim().replace(/^(dr|doctor)\.?\s+/i, '').trim();
+      return `Dr. ${clean}`;
     };
 
     const deletedSet = getDeletedStaffSet();
@@ -795,30 +802,54 @@ export default function OPD() {
       const n = String(u.name || '').toLowerCase().trim();
       const dept = String(u.department || '').toLowerCase().trim();
 
-      // Exclude non-clinical staff who are not doctors
-      const nonClinicalRoles = ['NURSE', 'PHARMACIST', 'PHARMACY', 'RECEPTIONIST', 'ACCOUNTANT', 'BILLING', 'LAB_STAFF', 'HR', 'SECURITY', 'CLEANER'];
-      if (nonClinicalRoles.includes(r) && !n.startsWith('dr.') && !n.startsWith('dr ')) {
+      // 1. HARD EXCLUSIONS - strictly exclude admins, receptionists, lab techs, nurses, pharmacists, accounts
+      // A. Admin & Management
+      if (r === 'ADMIN' || r === 'SUPER_ADMIN' || r === 'ADMINISTRATOR' || r === 'MANAGER' || r.includes('ADMIN')) {
         return false;
       }
-      if ((dept.includes('nursing') || dept.includes('pharmacy') || dept.includes('reception') || dept.includes('billing') || dept.includes('account')) && !n.startsWith('dr.') && !n.startsWith('dr ') && r !== 'DOCTOR' && r !== 'SURGEON') {
+      if (n.includes('(admin)') || n.includes(' admin') || n.startsWith('admin') || n.includes('administrator') || dept === 'administration' || dept === 'management') {
         return false;
       }
 
-      // Explicit doctor or surgical role
-      if (r === 'DOCTOR' || r === 'SURGEON' || r === 'PHYSICIAN' || r === 'CONSULTANT' || r.includes('DOCTOR') || r.includes('SURGEON') || r.includes('PHYSICIAN')) {
+      // B. Non-doctor staff roles
+      const nonDoctorRoleKeywords = [
+        'RECEPTIONIST', 'RECEPTION', 'FRONT_DESK', 'FRONT_OFFICE', 'CASHIER', 
+        'BILLING', 'ACCOUNTANT', 'ACCOUNTS', 'LAB', 'LAB_TECH', 'LAB_STAFF', 
+        'TECHNICIAN', 'PHARMACIST', 'PHARMACY', 'NURSE', 'NURSING', 'STAFF_NURSE', 
+        'HR', 'SECURITY', 'CLEANER', 'HOUSEKEEPING', 'DRIVER', 'ATTENDANT', 'PEON', 'CLERK', 'STAFF'
+      ];
+      if (nonDoctorRoleKeywords.some(kw => r === kw || r.includes(kw))) {
+        return false;
+      }
+
+      // C. Non-doctor departments
+      const nonDoctorDeptKeywords = [
+        'reception', 'front desk', 'front office', 'billing', 'accounts', 
+        'pharmacy', 'laboratory', 'pathology', 'lab', 'nursing', 'housekeeping', 
+        'administration', 'management', 'security', 'maintenance', 'hr'
+      ];
+      if (nonDoctorDeptKeywords.some(kd => dept === kd || dept.includes(kd))) {
+        return false;
+      }
+
+      // D. Non-doctor title words in name
+      const nonDoctorNameKeywords = [
+        'receptionist', 'reception', 'front desk', 'lab tech', 'lab technician', 
+        'technician', 'pharmacist', 'pharmacy', 'nurse', 'sister', 'accountant', 'cashier', 
+        '(admin)', 'admin', 'operator', 'attendant', 'helper'
+      ];
+      if (nonDoctorNameKeywords.some(kn => n.includes(kn))) {
+        return false;
+      }
+
+      // 2. HARD INCLUSIONS - genuine clinical doctors
+      const doctorRoles = ['DOCTOR', 'SURGEON', 'PHYSICIAN', 'CONSULTANT', 'MEDICAL_OFFICER'];
+      if (doctorRoles.includes(r) || r.includes('DOCTOR') || r.includes('SURGEON') || r.includes('PHYSICIAN')) {
         return true;
       }
 
-      // Name indicates doctor
-      if (n.startsWith('dr.') || n.startsWith('dr ') || n.includes('doctor') || n.includes('physician')) {
-        return true;
-      }
-
-      // Specialization / medical degree qualification
-      if (u.specialization || u.degree || u.qualification) {
-        if (r === 'ADMIN' || r === 'SUPER_ADMIN' || !r) {
-          return n.startsWith('dr.') || n.startsWith('dr ') || !!u.specialization;
-        }
+      // Starts with Dr or Dr. or Doctor (and not in excluded roles/names above)
+      if (/^(dr|doctor)\.?\s+/i.test(u.name.trim())) {
         return true;
       }
 
@@ -850,7 +881,7 @@ export default function OPD() {
 
       map.set(key, {
         id: u.id || `doc-${key}`,
-        name: u.name.startsWith('Dr.') ? u.name : `Dr. ${u.name}`,
+        name: formatDoctorDisplayName(u.name),
         role: u.role || 'DOCTOR',
         department: validDept,
         specialization: u.specialization || u.specialty || 'Consultant Physician',
@@ -868,7 +899,7 @@ export default function OPD() {
           if (key && !map.has(key)) {
             map.set(key, {
               id: v.id || `vs-${Math.random().toString(36).substring(2, 7)}`,
-              name: v.name.startsWith('Dr.') ? v.name : `Dr. ${v.name}`,
+              name: formatDoctorDisplayName(v.name),
               role: 'DOCTOR',
               department: v.specialty || v.department || 'Visiting Consultant',
               specialization: v.specialty || v.specialization || 'Visiting Specialist',
@@ -885,7 +916,10 @@ export default function OPD() {
       DEFAULT_HOSPITAL_DOCTORS.filter(d => !isDeletedUser(d)).forEach(d => {
         const key = getDocKey(d.name);
         if (key) {
-          map.set(key, { ...d });
+          map.set(key, { 
+            ...d,
+            name: formatDoctorDisplayName(d.name)
+          });
         }
       });
     }
@@ -5469,11 +5503,12 @@ export default function OPD() {
                               key={p.id} 
                               className="px-4 py-2.5 hover:bg-slate-50 cursor-pointer flex justify-between items-center border-b border-slate-100 last:border-0 transition-colors"
                               onClick={() => {
-                                const docToSelect = newAppointment.doctor || allDoctors[0]?.name || 'Dr. Rajesh Sharma';
+                                const validDoc = allDoctors.find(d => d.name === newAppointment.doctor)?.name;
+                                const docToSelect = validDoc || allDoctors[0]?.name || '';
                                 setNewAppointment(prev => ({
                                   ...prev,
                                   patientId: p.id,
-                                  doctor: prev.doctor || docToSelect,
+                                  doctor: docToSelect,
                                   date: prev.date || getLocalDateString(),
                                   time: prev.time || '10:00 AM'
                                 }));
@@ -5539,13 +5574,13 @@ export default function OPD() {
                       );
                     })()}
                   </div>
-                  <div className="space-y-2">
+                    <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label className="font-semibold text-slate-800">Doctor *</Label>
-                      <span className="text-[11px] text-slate-500 font-medium">{allDoctors.length} doctors available</span>
+                      <span className="text-[11px] text-slate-500 font-medium">{allDoctors.length} {allDoctors.length === 1 ? 'doctor' : 'doctors'} available</span>
                     </div>
                     <Select 
-                      value={newAppointment.doctor}
+                      value={allDoctors.some(d => d.name === newAppointment.doctor) ? newAppointment.doctor : (allDoctors[0]?.name || '')}
                       onValueChange={(v) => handleSelectDoctorForAppointment(v)}
                     >
                       <SelectTrigger className="bg-white border-slate-200">
@@ -5573,29 +5608,34 @@ export default function OPD() {
                     </Select>
 
                     {/* Quick Doctor Badges */}
-                    <div className="pt-1">
-                      <p className="text-[11px] text-slate-500 mb-1.5 font-medium">Quick Pick Doctor:</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {allDoctors.slice(0, 6).map(doc => {
-                          const isSelected = newAppointment.doctor === doc.name;
-                          return (
-                            <button
-                              key={doc.id || doc.name}
-                              type="button"
-                              onClick={() => handleSelectDoctorForAppointment(doc.name)}
-                              className={`text-xs px-2.5 py-1 rounded-md border transition-all text-left flex items-center gap-1.5 ${
-                                isSelected 
-                                  ? 'bg-blue-600 text-white border-blue-600 font-bold shadow-xs' 
-                                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
-                              }`}
-                            >
-                              <span className="truncate">{doc.name.replace('Dr. ', '')}</span>
-                              {doc.consultationFee !== undefined && doc.consultationFee !== null ? <span className={`text-[10px] ${isSelected ? 'text-blue-100' : 'text-slate-500'}`}>₹{doc.consultationFee}</span> : null}
-                            </button>
-                          );
-                        })}
+                    {allDoctors.length > 0 && (
+                      <div className="pt-1">
+                        <p className="text-[11px] text-slate-500 mb-1.5 font-medium">Quick Pick Doctor:</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {allDoctors.slice(0, 6).map(doc => {
+                            const selectedDocName = allDoctors.some(d => d.name === newAppointment.doctor) 
+                              ? newAppointment.doctor 
+                              : (allDoctors[0]?.name || '');
+                            const isSelected = selectedDocName === doc.name;
+                            return (
+                              <button
+                                key={doc.id || doc.name}
+                                type="button"
+                                onClick={() => handleSelectDoctorForAppointment(doc.name)}
+                                className={`text-xs px-2.5 py-1 rounded-md border transition-all text-left flex items-center gap-1.5 ${
+                                  isSelected 
+                                    ? 'bg-blue-600 text-white border-blue-600 font-bold shadow-xs' 
+                                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
+                                }`}
+                              >
+                                <span className="truncate">{doc.name.replace(/^(dr|doctor)\.?\s+/i, '')}</span>
+                                {doc.consultationFee !== undefined && doc.consultationFee !== null ? <span className={`text-[10px] ${isSelected ? 'text-blue-100' : 'text-slate-500'}`}>₹{doc.consultationFee}</span> : null}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
