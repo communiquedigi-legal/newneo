@@ -114,7 +114,7 @@ import { formatDate, getAppointmentTimestamp, cn, getAppointmentFinancials, clea
 import { toast } from 'sonner';
 import { storage, STORAGE_KEYS } from '@/lib/storage';
 import { playNotificationSound } from '@/lib/notifications';
-import { supabaseService, toDeterministicUuid, isUuid } from '@/services/supabaseService';
+import { supabaseService, toDeterministicUuid, isUuid, getDeletedStaffSet } from '@/services/supabaseService';
 import { useDataSync } from '@/hooks/useDataSync';
 import { canUserEditRecord, canUserEditClinicalData, canUserManageBilling, normalizeRole, canUserModifyRecord, canDoctorWritePrescription, canDoctorWriteClinicalNotes, isDoctorAssignedToPatient } from '@/utils/rbac';
 import { getPrescriptionPrintHtml } from '@/lib/prescriptionPrint';
@@ -742,9 +742,7 @@ export default function OPD() {
 
   const [selectedApptFees, setSelectedApptFees] = useState(() => {
     const opdCharges = storage.get(STORAGE_KEYS.OPD_CHARGES, { reg: 200, appt: 0, consult: 500 });
-    const defaultDoctorName = 'Dr. Rajesh Sharma';
-    const docObj = DEFAULT_HOSPITAL_DOCTORS.find(d => d.name === defaultDoctorName);
-    const defaultFee = docObj?.consultationFee || opdCharges?.consult || 500;
+    const defaultFee = opdCharges?.consult || 500;
     return {
       reg: { name: 'OPD Follow UP Fee', checked: false, amount: opdCharges?.reg || 200 },
       appt: { name: 'Appointment Fee', checked: false, amount: opdCharges?.appt || 0 },
@@ -755,88 +753,142 @@ export default function OPD() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [patients, setPatients] = useState<any[]>(() => storage.get(STORAGE_KEYS.PATIENTS, []));
   const [appointments, setAppointments] = useState<any[]>(() => storage.get(STORAGE_KEYS.APPOINTMENTS, []));
-  const [users, setUsers] = useState<any[]>(() => storage.get(STORAGE_KEYS.USERS, MOCK_USERS));
+  const [users, setUsers] = useState<any[]>(() => {
+    const stored = storage.get<any[]>(STORAGE_KEYS.USERS, []);
+    if (Array.isArray(stored) && stored.length > 0) return stored;
+    return [];
+  });
 
-  // Resolved list of all available doctors (Staff + Visiting Specialists + Hospital Defaults)
+  // Resolved list of all available doctors (strictly synchronized with Admin Settings Staff / Doctors list)
   const allDoctors = useMemo(() => {
     const map = new Map<string, any>();
 
     const getDocKey = (name: string) => {
-      return (name || '').toLowerCase().replace(/^dr\.?\s*/i, '').trim();
+      return (name || '').toLowerCase().replace(/^(dr|doctor)\.?\s+/i, '').trim();
     };
 
-    // 1. Hospital Defaults
-    DEFAULT_HOSPITAL_DOCTORS.forEach(d => {
-      const key = getDocKey(d.name);
-      if (key) {
-        map.set(key, { ...d });
+    const deletedSet = getDeletedStaffSet();
+    const isDeletedUser = (u: any) => {
+      if (!u) return true;
+      if (u.status === 'DELETED' || u.status === 'INACTIVE') return true;
+      const uId = String(u.id || '').toLowerCase().trim();
+      const uEmail = String(u.email || '').toLowerCase().trim();
+      const uName = String(u.name || '').toLowerCase().trim();
+      const uNameNorm = getDocKey(u.name);
+      return deletedSet.has(uId) || 
+             (uEmail && deletedSet.has(uEmail)) || 
+             (uName && deletedSet.has(uName)) || 
+             (uNameNorm && deletedSet.has(uNameNorm));
+    };
+
+    // 1. Registered Users / Staff from Admin Settings (Single Source of Truth)
+    const latestStoredUsers = storage.get<any[]>(STORAGE_KEYS.USERS, []) || [];
+    const sourceUsers = (Array.isArray(latestStoredUsers) && latestStoredUsers.length > 0)
+      ? latestStoredUsers
+      : (Array.isArray(users) && users.length > 0 ? users : []);
+
+    const isDoctorRole = (u: any) => {
+      if (!u || !u.name) return false;
+      if (isDeletedUser(u)) return false;
+
+      const r = String(u.role || '').toUpperCase().trim();
+      const n = String(u.name || '').toLowerCase().trim();
+      const dept = String(u.department || '').toLowerCase().trim();
+
+      // Exclude non-clinical staff who are not doctors
+      const nonClinicalRoles = ['NURSE', 'PHARMACIST', 'PHARMACY', 'RECEPTIONIST', 'ACCOUNTANT', 'BILLING', 'LAB_STAFF', 'HR', 'SECURITY', 'CLEANER'];
+      if (nonClinicalRoles.includes(r) && !n.startsWith('dr.') && !n.startsWith('dr ')) {
+        return false;
       }
+      if ((dept.includes('nursing') || dept.includes('pharmacy') || dept.includes('reception') || dept.includes('billing') || dept.includes('account')) && !n.startsWith('dr.') && !n.startsWith('dr ') && r !== 'DOCTOR' && r !== 'SURGEON') {
+        return false;
+      }
+
+      // Explicit doctor or surgical role
+      if (r === 'DOCTOR' || r === 'SURGEON' || r === 'PHYSICIAN' || r === 'CONSULTANT' || r.includes('DOCTOR') || r.includes('SURGEON') || r.includes('PHYSICIAN')) {
+        return true;
+      }
+
+      // Name indicates doctor
+      if (n.startsWith('dr.') || n.startsWith('dr ') || n.includes('doctor') || n.includes('physician')) {
+        return true;
+      }
+
+      // Specialization / medical degree qualification
+      if (u.specialization || u.degree || u.qualification) {
+        if (r === 'ADMIN' || r === 'SUPER_ADMIN' || !r) {
+          return n.startsWith('dr.') || n.startsWith('dr ') || !!u.specialization;
+        }
+        return true;
+      }
+
+      return false;
+    };
+
+    (sourceUsers || []).filter(u => isDoctorRole(u)).forEach((u: any) => {
+      const key = getDocKey(u.name);
+      if (!key) return;
+
+      let extractedFee = 500;
+      if (u.consultationFee !== undefined && u.consultationFee !== null && u.consultationFee !== '' && !isNaN(Number(u.consultationFee))) {
+        extractedFee = Number(u.consultationFee);
+      } else if (u.consultation_fee !== undefined && u.consultation_fee !== null && u.consultation_fee !== '' && !isNaN(Number(u.consultation_fee))) {
+        extractedFee = Number(u.consultation_fee);
+      } else if (u.fee !== undefined && u.fee !== null && u.fee !== '' && !isNaN(Number(u.fee))) {
+        extractedFee = Number(u.fee);
+      } else if (typeof u.degree === 'string' && u.degree.includes('[fee:')) {
+        const m = u.degree.match(/\[fee:(\d+)\]/);
+        if (m) extractedFee = Number(m[1]);
+      } else {
+        const opdCharges = storage.get(STORAGE_KEYS.OPD_CHARGES, { consult: 500 });
+        extractedFee = opdCharges?.consult || 500;
+      }
+
+      const validDept = u.department && !['all', 'admin', 'super admin', 'administration'].includes(u.department.toLowerCase().trim())
+        ? u.department
+        : (u.department || 'General Medicine');
+
+      map.set(key, {
+        id: u.id || `doc-${key}`,
+        name: u.name.startsWith('Dr.') ? u.name : `Dr. ${u.name}`,
+        role: u.role || 'DOCTOR',
+        department: validDept,
+        specialization: u.specialization || u.specialty || 'Consultant Physician',
+        degree: u.degree || u.qualification || '',
+        consultationFee: extractedFee
+      });
     });
 
-    // 2. Visiting Specialists from local storage
+    // 2. Visiting Specialists from local storage (if registered, active, and not deleted)
     try {
-      const visiting = storage.get(STORAGE_KEYS.VISITING_SPECIALISTS, []) || [];
+      const visiting = storage.get<any[]>(STORAGE_KEYS.VISITING_SPECIALISTS, []) || [];
       visiting.forEach((v: any) => {
-        if (v.name && v.status !== 'Inactive') {
+        if (v.name && v.status !== 'Inactive' && !isDeletedUser(v)) {
           const key = getDocKey(v.name);
-          if (key) {
-            const existing = map.get(key);
+          if (key && !map.has(key)) {
             map.set(key, {
-              id: v.id || existing?.id || `vs-${Math.random().toString(36).substring(2, 7)}`,
+              id: v.id || `vs-${Math.random().toString(36).substring(2, 7)}`,
               name: v.name.startsWith('Dr.') ? v.name : `Dr. ${v.name}`,
               role: 'DOCTOR',
-              department: v.specialty || v.department || existing?.department || 'Visiting Consultant',
-              specialization: v.specialty || v.specialization || existing?.specialization || 'Visiting Specialist',
-              degree: v.qualification || v.degree || existing?.degree || '',
-              consultationFee: Number(v.defaultConsultationFee || v.consultationFee) || existing?.consultationFee || (storage.get(STORAGE_KEYS.OPD_CHARGES, { consult: 500 }).consult || 500)
+              department: v.specialty || v.department || 'Visiting Consultant',
+              specialization: v.specialty || v.specialization || 'Visiting Specialist',
+              degree: v.qualification || v.degree || '',
+              consultationFee: Number(v.defaultConsultationFee || v.consultationFee) || (storage.get(STORAGE_KEYS.OPD_CHARGES, { consult: 500 }).consult || 500)
             });
           }
         }
       });
     } catch (e) {}
 
-    // 3. Registered Users / Staff from Database
-    const isDoctorRole = (role: string = '') => {
-      const r = role.toUpperCase();
-      return r.includes('DOCTOR') || r.includes('SURGEON') || r.includes('PHYSICIAN') || 
-             r.includes('CONSULT') || r.includes('SPECIALIST') || r.includes('SUPER_ADMIN') || 
-             r.includes('ADMIN') || r.includes('MEDICAL');
-    };
-
-    (users || []).forEach((u: any) => {
-      if (!u || !u.name) return;
-      const isDoc = isDoctorRole(u.role) || (u.name && u.name.toLowerCase().startsWith('dr.')) || !!u.specialization || !!u.degree;
-      if (isDoc) {
-        const key = getDocKey(u.name);
-        if (!key) return;
-        const existing = map.get(key);
-        let extractedFee = existing?.consultationFee !== undefined && existing?.consultationFee !== null ? Number(existing.consultationFee) : 500;
-        if (u.consultationFee !== undefined && u.consultationFee !== null && u.consultationFee !== '' && !isNaN(Number(u.consultationFee))) {
-          extractedFee = Number(u.consultationFee);
-        } else if (u.consultation_fee !== undefined && u.consultation_fee !== null && u.consultation_fee !== '' && !isNaN(Number(u.consultation_fee))) {
-          extractedFee = Number(u.consultation_fee);
-        } else if (u.fee !== undefined && u.fee !== null && u.fee !== '' && !isNaN(Number(u.fee))) {
-          extractedFee = Number(u.fee);
-        } else if (typeof u.degree === 'string' && u.degree.includes('[fee:')) {
-          const m = u.degree.match(/\[fee:(\d+)\]/);
-          if (m) extractedFee = Number(m[1]);
+    // 3. Fallback ONLY if hospital has ZERO registered doctors in Admin Settings and ZERO visiting doctors
+    if (map.size === 0) {
+      DEFAULT_HOSPITAL_DOCTORS.filter(d => !isDeletedUser(d)).forEach(d => {
+        const key = getDocKey(d.name);
+        if (key) {
+          map.set(key, { ...d });
         }
-
-        const validDept = u.department && !['all', 'admin', 'super admin', 'administration'].includes(u.department.toLowerCase().trim())
-          ? u.department
-          : (existing?.department || u.department || 'General Medicine');
-
-        map.set(key, {
-          id: u.id || existing?.id || `doc-${Date.now()}`,
-          name: u.name,
-          role: u.role || existing?.role || 'DOCTOR',
-          department: validDept,
-          specialization: u.specialization || u.specialty || existing?.specialization || 'Specialist',
-          degree: u.degree || u.qualification || existing?.degree || '',
-          consultationFee: extractedFee
-        });
-      }
-    });
+      });
+    }
 
     return Array.from(map.values());
   }, [users]);

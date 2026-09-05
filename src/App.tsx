@@ -99,7 +99,7 @@ import { Smartphone, LifeBuoy } from 'lucide-react';
 import { storage, STORAGE_KEYS } from '@/lib/storage';
 import { MOCK_PATIENTS, MOCK_USERS } from './mockData';
 import { User as UserType } from './types';
-import { supabaseService, syncOfflineDataWithSupabase } from '@/services/supabaseService';
+import { supabaseService, syncOfflineDataWithSupabase, getDeletedStaffSet } from '@/services/supabaseService';
 import { hasMenuAccess, normalizeRole, isUserAdmin } from '@/utils/rbac';
 
 export interface NavItem {
@@ -678,6 +678,30 @@ function QuickRegisterForm({ currentUser }: { currentUser: UserType | null }) {
   const [isRegistering, setIsRegistering] = useState(false);
 
   const availableDoctors = useMemo(() => {
+    const deletedSet = getDeletedStaffSet();
+    const isDeletedUser = (u: any) => {
+      if (!u) return true;
+      if (u.status === 'DELETED' || u.status === 'INACTIVE') return true;
+      const uId = String(u.id || '').toLowerCase().trim();
+      const uEmail = String(u.email || '').toLowerCase().trim();
+      const uName = String(u.name || '').toLowerCase().trim();
+      const uNameNorm = uName.replace(/^(dr|doctor)\.?\s+/i, '').trim();
+      return deletedSet.has(uId) || (uEmail && deletedSet.has(uEmail)) || (uName && deletedSet.has(uName)) || (uNameNorm && deletedSet.has(uNameNorm));
+    };
+
+    try {
+      const storedUsers = storage.get(STORAGE_KEYS.USERS, []);
+      const docUsers = (storedUsers || []).filter((u: any) => 
+        !isDeletedUser(u) && (
+          u.role?.toUpperCase() === 'DOCTOR' || 
+          u.role?.toUpperCase() === 'SURGEON' || 
+          (u.name && u.name.toLowerCase().includes('dr.')) ||
+          !!u.specialization
+        )
+      );
+      if (docUsers.length > 0) return docUsers;
+    } catch {}
+
     const defaultList = [
       { id: 'doc-1', name: 'Dr. Rajesh Sharma', department: 'Cardiology' },
       { id: 'doc-2', name: 'Dr. Priya Patel', department: 'Pediatrics' },
@@ -685,16 +709,7 @@ function QuickRegisterForm({ currentUser }: { currentUser: UserType | null }) {
       { id: 'doc-4', name: 'Dr. Sneha Reddy', department: 'Gynecology' },
       { id: 'doc-5', name: 'Dr. Vikram Malhotra', department: 'General Medicine' }
     ];
-    try {
-      const storedUsers = storage.get(STORAGE_KEYS.USERS, []);
-      const docUsers = (storedUsers || []).filter((u: any) => 
-        u.role?.toUpperCase() === 'DOCTOR' || 
-        u.role?.toUpperCase() === 'SURGEON' || 
-        (u.name && u.name.toLowerCase().includes('dr.'))
-      );
-      if (docUsers.length > 0) return docUsers;
-    } catch {}
-    return defaultList;
+    return defaultList.filter(d => !isDeletedUser(d));
   }, []);
 
   const duplicateMatch = useMemo(() => {

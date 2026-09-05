@@ -97,7 +97,7 @@ export function getDeletedStaffSet(): Set<string> {
   return new Set(arr.map(x => String(x).toLowerCase().trim()));
 }
 
-export function markStaffDeleted(id: string, email?: string) {
+export function markStaffDeleted(id: string, email?: string, name?: string) {
   const current = storage.get<string[]>(STORAGE_KEYS.DELETED_STAFF_IDS, []) || [];
   const set = new Set(current.map(x => String(x).toLowerCase().trim()));
   if (id) {
@@ -108,10 +108,16 @@ export function markStaffDeleted(id: string, email?: string) {
   if (email) {
     set.add(String(email).toLowerCase().trim());
   }
+  if (name) {
+    const rawName = String(name).toLowerCase().trim();
+    set.add(rawName);
+    const cleanName = rawName.replace(/^(dr|doctor|sister|mr|ms|mrs)\.?\s+/i, '').trim();
+    if (cleanName) set.add(cleanName);
+  }
   storage.set(STORAGE_KEYS.DELETED_STAFF_IDS, Array.from(set));
 }
 
-export function unmarkStaffDeleted(id?: string, email?: string) {
+export function unmarkStaffDeleted(id?: string, email?: string, name?: string) {
   const current = storage.get<string[]>(STORAGE_KEYS.DELETED_STAFF_IDS, []) || [];
   let filtered = current.map(x => String(x).toLowerCase().trim());
   if (id) {
@@ -122,6 +128,11 @@ export function unmarkStaffDeleted(id?: string, email?: string) {
   if (email) {
     const emailLower = String(email).toLowerCase().trim();
     filtered = filtered.filter(x => x !== emailLower);
+  }
+  if (name) {
+    const rawName = String(name).toLowerCase().trim();
+    const cleanName = rawName.replace(/^(dr|doctor|sister|mr|ms|mrs)\.?\s+/i, '').trim();
+    filtered = filtered.filter(x => x !== rawName && x !== cleanName);
   }
   storage.set(STORAGE_KEYS.DELETED_STAFF_IDS, filtered);
 }
@@ -4231,7 +4242,13 @@ const rawSupabaseService = {
         const uId = String(u.id || '').toLowerCase().trim();
         const uDet = toDeterministicUuid(u.id)?.toLowerCase().trim();
         const uEmail = String(u.email || '').toLowerCase().trim();
-        return deletedSet.has(uId) || (uDet ? deletedSet.has(uDet) : false) || (uEmail ? deletedSet.has(uEmail) : false);
+        const uName = String(u.name || '').toLowerCase().trim();
+        const uNameNorm = uName.replace(/^(dr|doctor|sister|mr|ms|mrs)\.?\s+/i, '').trim();
+        return deletedSet.has(uId) || 
+               (uDet ? deletedSet.has(uDet) : false) || 
+               (uEmail ? deletedSet.has(uEmail) : false) ||
+               (uName ? deletedSet.has(uName) : false) ||
+               (uNameNorm ? deletedSet.has(uNameNorm) : false);
       };
 
       // Filter out auto-generated dummy placeholder foreign keys
@@ -4310,10 +4327,17 @@ const rawSupabaseService = {
         mergedMap.set(targetKey, merged);
       };
 
-      // 1. Seed base default doctors & hospital staff (only if not deleted)
-      MOCK_USERS.filter(u => !isDeleted(u)).forEach(u => {
-        setOrMerge(u);
-      });
+      // 1. Check if hospital already has configured staff in database or local storage
+      const localUsers = storage.get(STORAGE_KEYS.USERS, []);
+      const hasDbStaff = (decodedStaff.length > 0 || decodedProfiles.length > 0);
+      const hasLocalStaff = Array.isArray(localUsers) && localUsers.length > 0;
+
+      // Only seed base default mock users if neither the database nor local storage has ANY staff profiles yet
+      if (!hasDbStaff && !hasLocalStaff) {
+        MOCK_USERS.filter(u => !isDeleted(u)).forEach(u => {
+          setOrMerge(u);
+        });
+      }
 
       // 2. Merge profiles from database
       decodedProfiles.forEach(p => {
@@ -4326,7 +4350,6 @@ const rawSupabaseService = {
       });
 
       // 4. Merge local storage users (top precedence to preserve recent user profile updates)
-      const localUsers = storage.get(STORAGE_KEYS.USERS, []);
       if (Array.isArray(localUsers)) {
         localUsers.filter(u => !isPlaceholderProfile(u) && !isDeleted(u)).forEach(u => {
           setOrMerge(u);
@@ -4716,9 +4739,10 @@ const rawSupabaseService = {
       const existingList = storage.get(STORAGE_KEYS.USERS, MOCK_USERS);
       const target = existingList.find((u: any) => u.id === id || u.id === dbId || String(u.id).toLowerCase() === String(id).toLowerCase());
       const targetEmail = target?.email ? String(target.email).trim().toLowerCase() : '';
+      const targetName = target?.name ? String(target.name).trim() : '';
 
-      markStaffDeleted(id, targetEmail);
-      if (dbId) markStaffDeleted(dbId);
+      markStaffDeleted(id, targetEmail, targetName);
+      if (dbId) markStaffDeleted(dbId, targetEmail, targetName);
 
       // 1. Soft-delete across Supabase so any query from any device immediately knows this staff member is deleted
       try {
@@ -4783,12 +4807,16 @@ const rawSupabaseService = {
       }
 
       // Sync to local storage
+      const normTargetName = targetName ? targetName.toLowerCase().replace(/^(dr|doctor|sister|mr|ms|mrs)\.?\s+/i, '').trim() : '';
       const filtered = existingList.filter((u: any) => {
         const uId = String(u.id || '').toLowerCase();
         const uEmail = String(u.email || '').toLowerCase();
+        const uName = String(u.name || '').toLowerCase();
+        const uNameNorm = uName.replace(/^(dr|doctor|sister|mr|ms|mrs)\.?\s+/i, '').trim();
         const isMatch = uId === String(id).toLowerCase() || 
                         uId === String(dbId).toLowerCase() || 
-                        (targetEmail && uEmail === targetEmail);
+                        (targetEmail && uEmail === targetEmail) ||
+                        (targetName && (uName === targetName.toLowerCase() || (normTargetName && uNameNorm === normTargetName)));
         return !isMatch;
       });
       storage.set(STORAGE_KEYS.USERS, filtered);

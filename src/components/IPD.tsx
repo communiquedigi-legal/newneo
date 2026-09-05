@@ -72,7 +72,7 @@ import {
   TabsTrigger 
 } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { supabaseService, saveAuditLog } from '@/services/supabaseService';
+import { supabaseService, saveAuditLog, getDeletedStaffSet } from '@/services/supabaseService';
 import { useDataSync } from '@/hooks/useDataSync';
 import { canUserModifyRecord, normalizeRole, canDoctorWriteClinicalNotes, canDoctorWritePrescription, isDoctorAssignedToPatient } from '@/utils/rbac';
 import { SpecialClinicalCharts } from './SpecialClinicalCharts';
@@ -270,17 +270,33 @@ export default function IPD({ activeRole }: { activeRole?: string }) {
   const [isChartOpen, setIsChartOpen] = useState(false);
 
   const doctorsList = useMemo(() => {
-    const list = (users && users.length > 0 ? users : MOCK_USERS).filter((u: any) => {
-      if (!u || !u.name) return false;
+    const deletedSet = getDeletedStaffSet();
+    const isDeletedUser = (u: any) => {
+      if (!u) return true;
+      if (u.status === 'DELETED' || u.status === 'INACTIVE') return true;
+      const uId = String(u.id || '').toLowerCase().trim();
+      const uEmail = String(u.email || '').toLowerCase().trim();
+      const uName = String(u.name || '').toLowerCase().trim();
+      const uNameNorm = uName.replace(/^(dr|doctor)\.?\s+/i, '').trim();
+      return deletedSet.has(uId) || (uEmail && deletedSet.has(uEmail)) || (uName && deletedSet.has(uName)) || (uNameNorm && deletedSet.has(uNameNorm));
+    };
+
+    const latestStoredUsers = storage.get<any[]>(STORAGE_KEYS.USERS, []) || [];
+    const sourceUsers = (Array.isArray(latestStoredUsers) && latestStoredUsers.length > 0)
+      ? latestStoredUsers
+      : (Array.isArray(users) && users.length > 0 ? users : []);
+
+    const list = sourceUsers.filter((u: any) => {
+      if (!u || !u.name || isDeletedUser(u)) return false;
       const r = (u.role || '').toUpperCase();
       const n = (u.name || '').toLowerCase();
       const email = (u.email || '').toLowerCase();
       if (email.endsWith('@globalhospital.com') && (n.includes('system administrator') || n.includes('accounts manager'))) {
         return false;
       }
-      return r === 'DOCTOR' || r === 'SURGEON' || r === 'SUPER_ADMIN' || n.startsWith('dr.') || n.includes('doctor') || n.includes('physician') || n.includes('surgeon');
+      return r === 'DOCTOR' || r === 'SURGEON' || n.startsWith('dr.') || n.includes('doctor') || n.includes('physician') || n.includes('surgeon') || !!u.specialization;
     });
-    return list.length > 0 ? list : MOCK_USERS.filter(u => u.role === 'DOCTOR' || u.role === 'SUPER_ADMIN');
+    return list;
   }, [users]);
 
   const [selectedPatient, setSelectedPatient] = useState<any>(null);
